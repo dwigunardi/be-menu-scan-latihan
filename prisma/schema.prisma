@@ -1,0 +1,60 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Admin User Model for Authentication & Session Management
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  password     String   // Hashed with bcrypt/argon2
+  name         String
+  refreshToken String?  // Hashed Refresh Token for revocation strategy
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+/// Category Model for grouping Menu Items (e.g., Makanan, Minuman, Dessert)
+model Category {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  sortOrder Int        @default(0) @map("sort_order")
+  deletedAt DateTime?  @map("deleted_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  menuItems MenuItem[]
+
+  @@index([deletedAt])
+  @@map("categories")
+}
+
+/// Menu Item Model representing dishes, drinks, and desserts
+model MenuItem {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  price       Decimal   @db.Decimal(10, 2)
+  imageUrl    String?   @map("image_url")
+  isAvailable Boolean   @default(true) @map("is_available")
+  categoryId  String    @map("category_id")
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Indexes for high-performance public & admin queries
+  @@index([categoryId, isAvailable])
+  @@index([categoryId, deletedAt])
+  @@index([isAvailable])
+  @@index([deletedAt])
+  @@map("menu_items")
+}

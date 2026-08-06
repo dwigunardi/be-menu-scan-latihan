@@ -5,6 +5,7 @@
 > **Database & ORM**: PostgreSQL & Prisma ORM  
 > **Validation & Schema**: Zod & `nestjs-zod`  
 > **Security & Auth**: Dual JWT (Access + Refresh Token) & ECDH AES-256-GCM Payload Encryption  
+> **Logging**: Structured Step-Tracing Logger (`nestjs-pino`)  
 > **Document Location**: `docs/architecture/architecture-design.md`  
 
 ---
@@ -19,7 +20,7 @@ Arsitektur aplikasi ini dibangun dengan mengadopsi **Feature-Based Modular Archi
    - **Controller**: Hanya menangani HTTP routing, ekstraksi request, dan pemanggilan service.
    - **Service**: Menangani seluruh *business logic* dan interaksi dengan database (Prisma).
    - **DTO (Zod)**: Bertanggung jawab atas kontrak dan validasi tipe data *input/output*.
-3. **Layered Lifecycle Pipeline**: Keamanan (Enkripsi/Deskripsi), Otentikasi (JWT), dan Validasi (Zod) dipisahkan secara tegas pada layer *Middleware*, *Guard*, *Pipe*, *Interceptor*, dan *Exception Filter*.
+3. **Layered Lifecycle Pipeline**: Keamanan (Enkripsi/Deskripsi), Otentikasi (JWT), Validasi (Zod), dan Logging dipisahkan secara tegas pada layer *Middleware*, *Guard*, *Pipe*, *Interceptor*, dan *Exception Filter*.
 
 ---
 
@@ -50,10 +51,13 @@ src/
 │   ├── interceptors/            # Response Transformation & Encryption
 │   │   ├── encrypt-payload.interceptor.ts # Enkripsi Response JSON
 │   │   └── transform.interceptor.ts       # Standarisasi JSON Response Wrapper
+│   ├── logger/                  # Step-Tracing Logger Module (nestjs-pino)
+│   │   ├── logger.module.ts     # Pino Logger & Redaction Setup
+│   │   └── logger.service.ts    # Utility untuk Step Logging
 │   ├── middlewares/             # Request Decryption
 │   │   └── decrypt-payload.middleware.ts  # Deskripsi Request Body sebelum masuk Pipe
 │   └── prisma/                  # Database Singleton Module
-│       ├── prisma.service.ts    # Lifecycle Connection Hook (onModuleInit, onModuleDestroy)
+│       ├── prisma.service.ts    # Lifecycle Connection Hook & Slow Query Logging (>500ms)
 │       └── prisma.module.ts     # @Global() Module
 │
 ├── modules/                     # Domain Feature Modules
@@ -80,48 +84,49 @@ src/
 
 ---
 
-## 🔄 3. Request & Response Lifecycle Flow
+## 🔄 3. Request & Response Lifecycle Flow (Step-Tracing)
 
-Berikut adalah alur perjalanan HTTP Request terenkripsi dari Client (Next.js) yang masuk ke NestJS hingga dikirimkan kembali sebagai HTTP Response:
+Berikut adalah alur perjalanan HTTP Request terenkripsi yang dicatat langkah demi langkah (*step-by-step*) oleh sistem logging:
 
 ```mermaid
 flowchart TD
     A[Incoming Encrypted Request] --> B[DecryptPayloadMiddleware]
     
-    subgraph Layer 1: Decryption
-        B -->|Read Header x-handshake-token| B1{Handshake Token Valid?}
+    subgraph Step 1: HTTP_INBOUND & PAYLOAD_DECRYPT
+        B -->|Step: HTTP_INBOUND| B1{Handshake Token Valid?}
         B1 -- No --> B2[Throw 401 Handshake Expired]
         B1 -- Yes --> B3[AES-256-GCM Decrypt Payload to req.body]
+        B3 -->|Step: PAYLOAD_DECRYPT| C
     end
 
-    B3 --> C[JwtAuthGuard / HandshakeGuard]
+    C[JwtAuthGuard / HandshakeGuard]
 
-    subgraph Layer 2: Security & Authentication
+    subgraph Step 2: SECURITY_AUTH
         C -->|Check @Public Decorator| C1{Is Endpoint Public?}
         C1 -- Yes --> D[ZodValidationPipe]
         C1 -- No --> C2{Is Access Token Valid?}
         C2 -- No --> C3[Throw 401 Unauthorized]
-        C2 -- Yes --> C4[Attach User Object to req.user] --> D
+        C2 -- Yes -->|Step: SECURITY_AUTH| C4[Attach User Object to req.user] --> D
     end
 
-    subgraph Layer 3: Input Validation
+    subgraph Step 3: VALIDATION_INPUT
         D --> D1{Zod Schema Valid?}
         D1 -- No --> D2[Throw 400 Bad Request / ZodError]
-        D1 -- Yes --> E[Controller & Service Logic]
+        D1 -- Yes -->|Step: VALIDATION_INPUT| E[Controller & Service Logic]
     end
 
-    subgraph Layer 4: Business Logic & DB
-        E --> E1[Prisma Database Query]
-        E1 --> E2[Return Raw Response Object]
+    subgraph Step 4 & 5: SERVICE_EXECUTION & DATABASE_QUERY
+        E -->|Step: SERVICE_EXECUTION| E1[Prisma Database Query]
+        E1 -->|Step: DATABASE_QUERY| E2[Return Raw Response Object]
     end
 
     E2 --> F[EncryptPayloadInterceptor]
 
-    subgraph Layer 5: Response Encryption
+    subgraph Step 6 & 7: RESPONSE_ENCRYPT & HTTP_OUTBOUND
         F --> F1{Is @SkipEncryption Present?}
         F1 -- Yes --> H[Send Raw Response]
-        F1 -- No --> F2[AES-256-GCM Encrypt Object with Fresh IV]
-        F2 --> H[Send Encrypted JSON Response]
+        F1 -- No -->|Step: RESPONSE_ENCRYPT| F2[AES-256-GCM Encrypt Object with Fresh IV]
+        F2 -->|Step: HTTP_OUTBOUND| H[Send Encrypted JSON Response]
     end
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
@@ -132,13 +137,17 @@ flowchart TD
 
 ## 🛠️ 4. Spesifikasi Layer Teknis
 
-### A. Database Layer (`PrismaModule`)
+### A. Database Layer (`PrismaModule` & PostgreSQL)
 - **Tipe Modul**: `@Global()` agar `PrismaService` dapat langsung di-inject tanpa re-import.
-- **Connection Management**:
-  - `onModuleInit()`: Mengkoneksikan Prisma Client ke PostgreSQL saat server dinyalakan.
-  - `onModuleDestroy()`: Memastikan koneksi ditutup secara bersih (*graceful shutdown*) saat server berhenti.
+- **Connection Management**: `onModuleInit()` dan `onModuleDestroy()` untuk *graceful shutdown*.
+- **Indexing & Soft Delete**: Rincian lengkap strategi query, indexing, dan soft delete tersedia di [database-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/architecture/database-strategy.md).
 
-### B. Security & Authentication Layer
+### B. Logging Layer (`nestjs-pino`)
+- **Step-Tracing Engine**: Menempelkan `requestId` (UUID) & `step` tag pada setiap layer eksekusi.
+- **Redaction Rules**: Mengenkripsi/menyembunyikan field sensitif (`password`, `payload`, `iv`, `tag`, `authorization`, `refreshToken`).
+- Rincian lengkap tersedia di [logging-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/architecture/logging-strategy.md).
+
+### C. Security & Authentication Layer
 1. **Dual JWT Token Strategy**:
    - **Access Token**: Berisi `userId`, `email`, `role`. Masa berlaku 15 menit. Disahkan oleh `JwtStrategy`.
    - **Refresh Token**: Berisi `userId`. Masa berlaku 7 hari. Disimpan ter-hash di DB (`User.refreshToken`). Disahkan oleh `JwtRefreshStrategy` pada endpoint `/api/v1/auth/refresh`.
@@ -146,14 +155,14 @@ flowchart TD
    - `DecryptPayloadMiddleware`: Berjalan sebelum Guard & Controller. Membaca `x-handshake-token` untuk mengambil `SessionKey` dari Cache/Memory.
    - `EncryptPayloadInterceptor`: Interceptor global yang menangkap return value Controller dan membungkusnya menjadi ciphertext terenkripsi.
 
-### C. Validation Layer (`nestjs-zod`)
+### D. Validation Layer (`nestjs-zod`)
 - Menggunakan `ZodValidationPipe` menggantikan `class-validator`.
 - Keuntungan Zod:
   - Tipe data TypeScript otomatis diturunkan dari Schema (`z.infer<typeof Schema>`).
   - Integrasi otomatis ke `@nestjs/swagger` untuk pembuatan OpenAPI Docs interaktif.
 
-### D. Global Exception Handling Layer (`GlobalExceptionFilter`)
-Menyediakan *response error format* yang konsisten di seluruh aplikasi:
+### E. Global Exception Handling Layer (`GlobalExceptionFilter`)
+Menangkap error dan mencatat log dengan `step: "EXCEPTION_CATCH"`. Format response error terstandar:
 ```json
 {
   "statusCode": 400,
@@ -171,7 +180,9 @@ Menyediakan *response error format* yang konsisten di seluruh aplikasi:
 
 ---
 
-## 🔗 5. Terhubung ke Dokumentasi Terkait
+## 🔗 5. Terhubung ke Dokumen Terkait
 
 - 📄 Wireframe API & Blueprint Schema: [wireframe-api-not-final.md](file:///d:/code/be-menu-scan-latihan/docs/wireframe/wireframe-api-not-final.md)
 - 📄 Spesifikasi Enkripsi Payload: [encryption-decryption-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/security/encryption-decryption-strategy.md)
+- 📄 Spesifikasi Step-Tracing Logging: [logging-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/architecture/logging-strategy.md)
+- 📄 Spesifikasi Database & Query Strategy: [database-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/architecture/database-strategy.md)
