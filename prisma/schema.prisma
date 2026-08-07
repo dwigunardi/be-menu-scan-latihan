@@ -9,6 +9,20 @@ datasource db {
   provider = "postgresql"
 }
 
+enum TableStatus {
+  VACANT
+  OCCUPIED
+  WAITING_PAYMENT
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  SERVED
+  PAID
+  CANCELLED
+}
+
 /// Admin User Model for Authentication & Session Management
 model User {
   id           String   @id @default(uuid())
@@ -39,17 +53,18 @@ model Category {
 
 /// Menu Item Model representing dishes, drinks, and desserts
 model MenuItem {
-  id          String    @id @default(uuid())
+  id          String      @id @default(uuid())
   name        String
   description String?
-  price       Decimal   @db.Decimal(10, 2)
-  imageUrl    String?   @map("image_url")
-  isAvailable Boolean   @default(true) @map("is_available")
-  categoryId  String    @map("category_id")
-  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  deletedAt   DateTime? @map("deleted_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  price       Decimal     @db.Decimal(10, 2)
+  imageUrl    String?     @map("image_url")
+  isAvailable Boolean     @default(true) @map("is_available")
+  categoryId  String      @map("category_id")
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  deletedAt   DateTime?   @map("deleted_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   // Indexes for high-performance public & admin queries
   @@index([categoryId, isAvailable])
@@ -57,4 +72,57 @@ model MenuItem {
   @@index([isAvailable])
   @@index([deletedAt])
   @@map("menu_items")
+}
+
+/// Restaurant Table Model for QR Code Binding & Table Status Management
+model Table {
+  id                 String      @id @default(uuid())
+  number             String      @unique // Meja 01, Meja 02, VIP-1
+  status             TableStatus @default(VACANT)
+  activeCustomerName String?     @map("active_customer_name")
+  orders             Order[]
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("tables")
+}
+
+/// Order Model for Customer Orders & CMS Revenue Tracking
+model Order {
+  id           String      @id @default(uuid())
+  orderNumber  String      @unique @map("order_number") // #ORD-20260807-001
+  tableId      String      @map("table_id")
+  table        Table       @relation(fields: [tableId], references: [id])
+  customerName String      @map("customer_name")
+  status       OrderStatus @default(PENDING)
+  totalAmount  Decimal     @db.Decimal(10, 2) @map("total_amount")
+  orderItems   OrderItem[]
+  paidAt       DateTime?   @map("paid_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@index([tableId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+/// Order Item Detail Model with Snapshot of Name & Price
+model OrderItem {
+  id               String   @id @default(uuid())
+  orderId          String   @map("order_id")
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId       String   @map("menu_item_id")
+  menuItem         MenuItem @relation(fields: [menuItemId], references: [id])
+  menuNameSnapshot String   @map("menu_name_snapshot")
+  priceSnapshot    Decimal  @db.Decimal(10, 2) @map("price_snapshot")
+  quantity         Int
+  subtotal         Decimal  @db.Decimal(10, 2)
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([menuItemId])
+  @@map("order_items")
 }
