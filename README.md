@@ -11,20 +11,27 @@
 - **Validation**: [Zod](https://zod.dev/) & [`nestjs-zod`](https://github.com/risen-crypto/nestjs-zod)
 - **Authentication**: JWT Dual-Token Strategy (Access Token 15m + Refresh Token 7d)
 - **Security**: ECDH Key Exchange + AES-256-GCM Payload Encryption (End-to-End Handshake)
+- **Logging**: Structured Step-Tracing Logger (`nestjs-pino`)
 - **API Documentation**: Swagger / OpenAPI (Integrated with Zod DTOs)
 
 ---
 
 ## 🏛️ System Architecture & Documentation
 
-Perencanaan dan arsitektur sistem terdokumentasi secara mendetail di folder `docs/`:
+Perencanaan, arsitektur, dan pelacakan milestone sistem terdokumentasi di folder `docs/`:
 
+- 🗺️ **[Implementation Milestones & Roadmap](docs/roadmap/implementation-milestones.md)**  
+  Dokumen tracking tahapan & milestone pengerjaan proyek dari Phase 0 hingga Phase 4.
 - 📄 **[Wireframe API & Blueprint Schema](docs/wireframe/wireframe-api-not-final.md)**  
-  Menjelaskan rincian endpoint Public & Admin, skema Prisma, dan kebutuhan paket.
+  Rincian endpoint Public & Admin, skema Prisma, dan kebutuhan paket.
 - 📄 **[Payload Encryption Strategy](docs/security/encryption-decryption-strategy.md)**  
   Spesifikasi protokol ECDH Handshake, HKDF Key Derivation, dan format payload terenkripsi AES-256-GCM.
 - 📄 **[Architecture Design Specification](docs/architecture/architecture-design.md)**  
-  Struktur folder modular `src/`, diagram alur eksekusi request-response (Middleware, Guard, Pipe, Interceptor), dan penanganan exception.
+  Struktur folder modular `src/`, diagram alur eksekusi request-response (Middleware, Guard, Pipe, Interceptor).
+- 📄 **[Step-Tracing Logging Strategy](docs/architecture/logging-strategy.md)**  
+  Pino structured logging, data redaction, & Opsi B (Hybrid Transport).
+- 📄 **[Database & Query Strategy Specification](docs/architecture/database-strategy.md)**  
+  Indexing strategy, soft delete, N+1 query prevention, & slow query threshold monitoring.
 
 ---
 
