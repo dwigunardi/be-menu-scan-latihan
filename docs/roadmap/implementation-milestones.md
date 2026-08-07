@@ -23,7 +23,7 @@
 
 - [x] **0.1. API Wireframe Specification**
   - Document: [wireframe-api-not-final.md](file:///d:/code/be-menu-scan-latihan/docs/wireframe/wireframe-api-not-final.md)
-  - Detail endpoint publik, auth, admin, meja, pesanan, & laporan.
+  - Detail endpoint publik, auth, admin, meja, pesanan, banner promo, & laporan.
 - [x] **0.2. Payload Encryption & ECDH Handshake Strategy**
   - Document: [encryption-decryption-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/security/encryption-decryption-strategy.md)
   - Spesifikasi AES-256-GCM, HKDF, & handshake protocol.
@@ -38,10 +38,10 @@
   - Indexing strategy, soft delete, N+1 query prevention, & slow query monitoring.
 - [x] **0.6. Environment & Package Dependencies**
   - File: [.env](file:///d:/code/be-menu-scan-latihan/.env) & [.env.example](file:///d:/code/be-menu-scan-latihan/.env.example)
-  - Package `prisma`, `zod`, `nestjs-zod`, `nestjs-pino`, `@nestjs/jwt`, `@nestjs/swagger`, `bcrypt`, dll.
+  - Package `prisma`, `zod`, `nestjs-zod`, `nestjs-pino`, `@nestjs/jwt`, `@nestjs/swagger`, `@prisma/adapter-pg`, `pg`, `bcrypt`, dll.
 - [x] **0.7. Prisma Schema & Database Migration**
   - File: [schema.prisma](file:///d:/code/be-menu-scan-latihan/prisma/schema.prisma) & [prisma.config.ts](file:///d:/code/be-menu-scan-latihan/prisma.config.ts)
-  - Database PostgreSQL `menuscan_db` berdiri (Tabel: `users`, `categories`, `menu_items`, `tables`, `orders`, `order_items`).
+  - Database PostgreSQL `menuscan_db` berdiri (Tabel: `users`, `categories`, `menu_items`, `menu_item_variant_groups`, `menu_item_variant_options`, `promo_banners`, `tables`, `orders`, `order_items`, `order_item_variants`).
 
 ---
 
@@ -89,25 +89,28 @@
   - Endpoint `/api/v1/auth/refresh` (Access Token Renewal).
   - Endpoint `/api/v1/auth/logout` (Revoke Refresh Token).
   - Passport JWT Strategies (`JwtStrategy`, `JwtRefreshStrategy`) & Guards.
-- [ ] **3.2. Categories Module** (`src/modules/categories/`)
+- [ ] **3.2. Banners Module** (`src/modules/banners/`)
+  - Public `GET /api/v1/public/banners` (Return promo banners aktif).
+  - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/banners`.
+- [ ] **3.3. Categories Module** (`src/modules/categories/`)
   - Public `GET /api/v1/public/categories` (Return list kategori + item count).
   - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/categories`.
   - Admin Reordering Kategori (`sortOrder`).
-- [ ] **3.3. Menus Module** (`src/modules/menus/`)
-  - Public `GET /api/v1/public/menus` (Filter by category, search, availability).
-  - Public `GET /api/v1/public/menus/:id` (Detail menu).
+- [ ] **3.4. Menus & Variants Module** (`src/modules/menus/`)
+  - Public `GET /api/v1/public/menus` (Filter by category, search, isBestSeller, isRecommended).
+  - Public `GET /api/v1/public/menus/:id` (Detail menu + variantGroups & options).
   - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/menus`.
   - Admin Fast Toggle `PATCH /api/v1/admin/menus/:id/status` (`isAvailable`).
-- [ ] **3.4. Tables Module** (`src/modules/tables/`)
+- [ ] **3.5. Tables Module** (`src/modules/tables/`)
   - Public `GET /api/v1/public/tables/:number/status` (Cek status meja & activeCustomerName).
   - Public `POST /api/v1/public/tables/:number/session` (Inisialisasi sesi meja & nama pemesan).
   - Admin `GET /api/v1/admin/tables` & `POST /api/v1/admin/tables/:id/reset`.
-- [ ] **3.5. Orders Module** (`src/modules/orders/`)
-  - Public `POST /api/v1/public/orders` (Buat pesanan baru dari cart).
+- [ ] **3.6. Orders Module** (`src/modules/orders/`)
+  - Public `POST /api/v1/public/orders` (Buat pesanan baru dengan pilihan variasi/extra).
   - Public `GET /api/v1/public/orders/:orderNumber` (Status pesanan meja).
   - Admin `GET /api/v1/admin/orders` (Live Orders Monitor Dapur/Kasir).
   - Admin `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan).
-- [ ] **3.6. Reports Module** (`src/modules/reports/`)
+- [ ] **3.7. Reports Module** (`src/modules/reports/`)
   - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan & Omset).
   - Admin `GET /api/v1/admin/reports/top-selling` (Top Menu Paling Laris).
 
@@ -118,8 +121,10 @@
 - [ ] **4.1. Database Seeder Script** (`prisma/seed.ts`)
   - Seed Admin default (`admin@menuscan.com` / `admin123`).
   - Seed Meja default (Meja 01 s/d Meja 10).
-  - Seed sampel Kategori (Makanan Utama, Minuman, Dessert) & sampel Menu.
+  - Seed Sampel Promo Banners.
+  - Seed Sampel Kategori (Coffee, Non-Coffee, Local Favorites, Fast Food & Snacks, Desserts).
+  - Seed Sampel Menu Kopi dengan Variasi (Ukuran: Regular/Large, Temperature: Hot/Iced, Extra Add-ons: Extra Shot/Creamer/Topping) & Menu tanpa Variasi (Air Mineral).
 - [ ] **4.2. End-to-End API Verification**
-  - Testing alur Handshake -> Login -> Scan Meja -> Buat Pesanan -> Status Update -> Laporan Pendapatan.
+  - Testing alur Handshake -> Login -> Scan Meja -> Pilih Variasi -> Buat Pesanan -> Status Update -> Laporan Pendapatan.
 - [ ] **4.3. Final Documentation & Walkthrough Update**
   - Walkthrough final & panduan serah terima proyek.
