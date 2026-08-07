@@ -12,8 +12,8 @@
 | Phase | Description | Status | Completion |
 | :--- | :--- | :---: | :---: |
 | **Phase 0** | Planning, Architecture & Database Setup | ✅ **DONE** | 100% |
-| **Phase 1** | Core Foundation & Infrastructure Modules | ⏳ **IN PROGRESS** | 0% |
-| **Phase 2** | Global Security, Validation & Swagger | ⬜ **PENDING** | 0% |
+| **Phase 1** | Core Foundation & Infrastructure Modules | ✅ **DONE** | 100% |
+| **Phase 2** | Global Security, Validation & Swagger | ⏳ **IN PROGRESS** | 0% |
 | **Phase 3** | Feature Domain Modules (Business Logic) | ⬜ **PENDING** | 0% |
 | **Phase 4** | Seeding, Verification & Finalization | ⬜ **PENDING** | 0% |
 
@@ -45,24 +45,23 @@
 
 ---
 
-## 🏗️ Phase 1: Core Foundation & Infrastructure Modules
+## ✅ Phase 1: Core Foundation & Infrastructure Modules (COMPLETED)
 
-- [ ] **1.1. Environment Zod Config Module** (`src/config/`)
-  - Schema validasi `.env` berbasis Zod (`env.config.ts`).
+- [x] **1.1. Environment Zod Config Module** (`src/config/`)
+  - Schema validasi `.env` berbasis Zod ([env.config.ts](file:///d:/code/be-menu-scan-latihan/src/config/env.config.ts) & [app.config.ts](file:///d:/code/be-menu-scan-latihan/src/config/app.config.ts)).
   - Mencegah server menyala jika ada `.env` yang salah.
-- [ ] **1.2. Prisma Global Module & Service** (`src/common/prisma/`)
-  - `@Global()` `PrismaModule`.
-  - Service lifecycle (`onModuleInit`, `onModuleDestroy`).
-  - Prisma Extension / Slow Query Logger (> 500ms).
-- [ ] **1.3. Pino Step-Tracing Logger Module** (`src/common/logger/`)
-  - Integrasi `nestjs-pino` + `pino-roll` (Hybrid Transport).
-  - Masking data sensitif (`password`, `payload`, `iv`, `tag`, `authorization`).
-- [ ] **1.4. Crypto & ECDH Handshake Service** (`src/common/crypto/`)
-  - `CryptoService`: AES-256-GCM Encrypt & Decrypt + HKDF Derivation.
-  - `EcdhService`: ECDH keypair generation & shared secret computation.
-- [ ] **1.5. Decrypt Middleware & Encrypt Interceptor** (`src/common/middlewares/` & `interceptors/`)
-  - `DecryptPayloadMiddleware`: Deskripsi otomatis `req.body` dari client.
-  - `EncryptPayloadInterceptor`: Enkripsi otomatis return value controller.
+- [x] **1.2. Prisma Global Module & Service** (`src/common/prisma/`)
+  - `@Global()` [prisma.module.ts](file:///d:/code/be-menu-scan-latihan/src/common/prisma/prisma.module.ts).
+  - Service lifecycle (`onModuleInit`, `onModuleDestroy`) & Slow Query Logger (> 500ms) di [prisma.service.ts](file:///d:/code/be-menu-scan-latihan/src/common/prisma/prisma.service.ts).
+- [x] **1.3. Pino Step-Tracing Logger Module** (`src/common/logger/`)
+  - Integrasi `nestjs-pino` + `pino-roll` di [logger.module.ts](file:///d:/code/be-menu-scan-latihan/src/common/logger/logger.module.ts).
+  - Generasi `requestId` UUID & Masking data sensitif (`password`, `payload`, `iv`, `tag`, `authorization`).
+- [x] **1.4. Crypto & ECDH Handshake Service** (`src/common/crypto/`)
+  - [crypto.service.ts](file:///d:/code/be-menu-scan-latihan/src/common/crypto/crypto.service.ts): AES-256-GCM Encrypt & Decrypt + HKDF Derivation.
+  - [ecdh.service.ts](file:///d:/code/be-menu-scan-latihan/src/common/crypto/ecdh.service.ts): ECDH keypair generation & session key manager.
+- [x] **1.5. Decrypt Middleware & Encrypt Interceptor** (`src/common/middlewares/` & `interceptors/`)
+  - [decrypt-payload.middleware.ts](file:///d:/code/be-menu-scan-latihan/src/common/middlewares/decrypt-payload.middleware.ts): Deskripsi otomatis `req.body` dari client.
+  - [encrypt-payload.interceptor.ts](file:///d:/code/be-menu-scan-latihan/src/common/interceptors/encrypt-payload.interceptor.ts): Enkripsi otomatis return value controller.
 
 ---
 
