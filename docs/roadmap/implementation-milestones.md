@@ -23,7 +23,7 @@
 
 - [x] **0.1. API Wireframe Specification**
   - Document: [wireframe-api-not-final.md](file:///d:/code/be-menu-scan-latihan/docs/wireframe/wireframe-api-not-final.md)
-  - Detail endpoint publik, auth, & admin.
+  - Detail endpoint publik, auth, admin, meja, pesanan, & laporan.
 - [x] **0.2. Payload Encryption & ECDH Handshake Strategy**
   - Document: [encryption-decryption-strategy.md](file:///d:/code/be-menu-scan-latihan/docs/security/encryption-decryption-strategy.md)
   - Spesifikasi AES-256-GCM, HKDF, & handshake protocol.
@@ -41,7 +41,7 @@
   - Package `prisma`, `zod`, `nestjs-zod`, `nestjs-pino`, `@nestjs/jwt`, `@nestjs/swagger`, `bcrypt`, dll.
 - [x] **0.7. Prisma Schema & Database Migration**
   - File: [schema.prisma](file:///d:/code/be-menu-scan-latihan/prisma/schema.prisma) & [prisma.config.ts](file:///d:/code/be-menu-scan-latihan/prisma.config.ts)
-  - Database PostgreSQL `menuscan_db` berdiri & terverifikasi via DBeaver ERD.
+  - Database PostgreSQL `menuscan_db` berdiri (Tabel: `users`, `categories`, `menu_items`, `tables`, `orders`, `order_items`).
 
 ---
 
@@ -73,7 +73,7 @@
   - [skip-encryption.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/skip-encryption.decorator.ts) -> Bypass Payload Encryption.
 - [x] **2.2. Global Exception Filter** (`src/common/filters/`)
   - [global-exception.filter.ts](file:///d:/code/be-menu-scan-latihan/src/common/filters/global-exception.filter.ts) (Penanganan error terpusat ZodError, PrismaError, & HttpException dengan tag `step: "EXCEPTION_CATCH"`).
-- [x] **2.3. Zod Validation Pipe & Response Transformation** (`nestjs-zod`)
+- [x] **2.3. Zod Pipe & Response Transformation** (`nestjs-zod`)
   - Integrasi `ZodValidationPipe` global di [main.ts](file:///d:/code/be-menu-scan-latihan/src/main.ts).
   - [transform.interceptor.ts](file:///d:/code/be-menu-scan-latihan/src/common/interceptors/transform.interceptor.ts) untuk standarisasi format response JSON.
 - [x] **2.4. Swagger OpenAPI Setup** (`main.ts`)
@@ -98,6 +98,18 @@
   - Public `GET /api/v1/public/menus/:id` (Detail menu).
   - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/menus`.
   - Admin Fast Toggle `PATCH /api/v1/admin/menus/:id/status` (`isAvailable`).
+- [ ] **3.4. Tables Module** (`src/modules/tables/`)
+  - Public `GET /api/v1/public/tables/:number/status` (Cek status meja & activeCustomerName).
+  - Public `POST /api/v1/public/tables/:number/session` (Inisialisasi sesi meja & nama pemesan).
+  - Admin `GET /api/v1/admin/tables` & `POST /api/v1/admin/tables/:id/reset`.
+- [ ] **3.5. Orders Module** (`src/modules/orders/`)
+  - Public `POST /api/v1/public/orders` (Buat pesanan baru dari cart).
+  - Public `GET /api/v1/public/orders/:orderNumber` (Status pesanan meja).
+  - Admin `GET /api/v1/admin/orders` (Live Orders Monitor Dapur/Kasir).
+  - Admin `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan).
+- [ ] **3.6. Reports Module** (`src/modules/reports/`)
+  - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan & Omset).
+  - Admin `GET /api/v1/admin/reports/top-selling` (Top Menu Paling Laris).
 
 ---
 
@@ -105,8 +117,9 @@
 
 - [ ] **4.1. Database Seeder Script** (`prisma/seed.ts`)
   - Seed Admin default (`admin@menuscan.com` / `admin123`).
+  - Seed Meja default (Meja 01 s/d Meja 10).
   - Seed sampel Kategori (Makanan Utama, Minuman, Dessert) & sampel Menu.
 - [ ] **4.2. End-to-End API Verification**
-  - Testing alur Handshake -> Login -> Admin CRUD -> Public Menu View.
+  - Testing alur Handshake -> Login -> Scan Meja -> Buat Pesanan -> Status Update -> Laporan Pendapatan.
 - [ ] **4.3. Final Documentation & Walkthrough Update**
   - Walkthrough final & panduan serah terima proyek.

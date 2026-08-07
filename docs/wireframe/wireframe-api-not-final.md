@@ -1,9 +1,9 @@
-# Wireframe API & System Design (Draft / Not Final)
+# Wireframe API & System Design (Draft / Updated with Table Binding & Orders)
 
 > **Project**: MenuScan – Digital QR Code Menu System  
-> **Status**: Work In Progress / Brainstorming Phase  
+> **Status**: Work In Progress / Architecture & API Blueprint  
 > **Backend Tech**: NestJS, PostgreSQL, Prisma ORM, Zod Validation  
-> **Security Tech**: JWT (Access Token + Refresh Token), Payload Encryption Handshake (AES-256-GCM)  
+> **Security Tech**: JWT Dual Token (Admin), Guest Table-Session Token (Customer), Payload Encryption Handshake (AES-256-GCM)  
 
 ---
 
@@ -14,28 +14,30 @@
 
 ---
 
-### 🟢 1. Public Endpoints (Pelanggan / Public Next.js View)
-Akses publik tanpa otentikasi. Digunakan oleh halaman menu restoran via QR Code.
+### 🟢 1. Public Customer Endpoints (Pelanggan via QR Code / Next.js)
+Akses publik tanpa login akun. Menggunakan **Handshake Token** (`x-handshake-token`) & **Guest Table-Session Token**.
 
 | Method | Endpoint | Description | Query Params / Body | Response / Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/public/categories` | Ambil semua kategori aktif | - | Return list kategori & sortOrder |
+| `GET` | `/api/v1/public/categories` | Ambil semua kategori aktif | - | Return list kategori & count menu |
 | `GET` | `/api/v1/public/menus` | Ambil daftar menu | `categoryId`, `search`, `isAvailable` | Filter menu & search |
-| `GET` | `/api/v1/public/menus/:id` | Detail menu tunggal | `id` (path) | Response detail item menu |
+| `GET` | `/api/v1/public/menus/:id` | Detail menu tunggal | `id` (path) | Detail menu item |
+| `GET` | `/api/v1/public/tables/:number/status` | Cek status meja & nama pemesan aktif | `number` (path) | `{ status: "VACANT\|OCCUPIED", activeCustomerName? }` |
+| `POST` | `/api/v1/public/tables/:number/session` | Inisialisasi sesi meja (Input Nama) | `{ customerName }` | `{ tableSessionToken, customerName }` |
+| `POST` | `/api/v1/public/orders` | Buat pesanan baru dari cart | `{ tableSessionToken, items: [{ menuItemId, quantity, notes? }] }` | `{ orderNumber, totalAmount, status: "PENDING" }` |
+| `GET` | `/api/v1/public/orders/:orderNumber` | Cek status pesanan meja | `orderNumber` (path) | Detail status pesanan (`PENDING`, `PREPARING`, `SERVED`) |
 
 ---
 
-### 🔐 2. Auth Endpoints (JWT Dual Token & Handshake Strategy)
-
-Sistem menggunakan **Access Token** (masa berlaku singkat: 15 menit) dan **Refresh Token** (masa berlaku panjang: 7 hari + tersimpan secure/hashed di DB).
+### 🔐 2. Auth Endpoints (JWT Admin Dual Token Strategy)
 
 | Method | Endpoint | Description | Payload Body / Header | Response / Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/handshake` | Pertukaran kunci / Inisialisasi sesi enkripsi | `{ clientPublicKey? }` | `{ serverHandshakeToken, sessionKey }` |
+| `POST` | `/api/v1/auth/handshake` | Pertukaran kunci / Inisialisasi sesi enkripsi | `{ clientPublicKey, nonce }` | `{ serverPublicKey, handshakeToken }` |
 | `POST` | `/api/v1/auth/login` | Login admin restoran | `{ email, password }` | `{ accessToken, refreshToken }` |
-| `POST` | `/api/v1/auth/refresh` | Perbarui Access Token yang kadaluarsa | `{ refreshToken }` atau via HTTP Cookie | `{ accessToken, refreshToken }` |
-| `POST` | `/api/v1/auth/logout` | Revoke Refresh Token & Logout | Header: `Bearer <accessToken>` | `{ success: true }` |
-| `GET` | `/api/v1/auth/me` | Cek profil admin terautentikasi | Header: `Bearer <accessToken>` | User object tanpa password |
+| `POST` | `/api/v1/auth/refresh` | Perbarui Access Token | `{ refreshToken }` | `{ accessToken, refreshToken }` |
+| `POST` | `/api/v1/auth/logout` | Revoke Refresh Token | Header: `Bearer <accessToken>` | `{ success: true }` |
+| `GET` | `/api/v1/auth/me` | Cek profil admin | Header: `Bearer <accessToken>` | User object tanpa password |
 
 ---
 
@@ -45,10 +47,10 @@ Memerlukan header otentikasi: `Authorization: Bearer <accessToken>`
 #### Category Management (Zod Schema Validated)
 | Method | Endpoint | Description | Payload Body (Zod DTO) |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/admin/categories` | List semua kategori (termasuk metadata) | - |
+| `GET` | `/api/v1/admin/categories` | List semua kategori | - |
 | `POST` | `/api/v1/admin/categories` | Tambah kategori baru | `{ name: string, sortOrder?: number }` |
 | `PATCH` | `/api/v1/admin/categories/:id` | Edit kategori | `{ name?: string, sortOrder?: number }` |
-| `DELETE` | `/api/v1/admin/categories/:id` | Hapus kategori | - |
+| `DELETE` | `/api/v1/admin/categories/:id` | Soft delete kategori | - |
 
 #### Menu Items Management (Zod Schema Validated)
 | Method | Endpoint | Description | Payload Body (Zod DTO) |
@@ -57,19 +59,48 @@ Memerlukan header otentikasi: `Authorization: Bearer <accessToken>`
 | `POST` | `/api/v1/admin/menus` | Buat menu baru | `{ name, description?, price, categoryId, imageUrl? }` |
 | `PATCH` | `/api/v1/admin/menus/:id` | Edit data menu | `{ name?, description?, price?, categoryId?, imageUrl? }` |
 | `PATCH` | `/api/v1/admin/menus/:id/status` | Fast toggle status ketersediaan | `{ isAvailable: boolean }` |
-| `DELETE` | `/api/v1/admin/menus/:id` | Hapus menu | - |
+| `DELETE` | `/api/v1/admin/menus/:id` | Soft delete menu | - |
+
+#### Table & Order CMS Management
+| Method | Endpoint | Description | Payload Body (Zod DTO) |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/admin/tables` | List semua meja & statusnya | - |
+| `POST` | `/api/v1/admin/tables` | Tambah meja baru | `{ number: string }` |
+| `POST` | `/api/v1/admin/tables/:id/reset` | Reset status meja menjadi `VACANT` | - |
+| `GET` | `/api/v1/admin/orders` | Monitor pesanan masuk (Live Orders) | Params: `status`, `tableNumber` |
+| `PATCH` | `/api/v1/admin/orders/:id/status` | Update status pesanan (Dapur/Kasir) | `{ status: "PREPARING\|SERVED\|PAID\|CANCELLED" }` |
+
+#### Revenue & Analytics Reports
+| Method | Endpoint | Description | Query Params |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/admin/reports/revenue` | Laporan pendapatan & omset | `startDate`, `endDate` |
+| `GET` | `/api/v1/admin/reports/top-selling` | Top menu paling laris | `limit` (default: 5) |
 
 ---
 
 ## 🗄️ Database Schema Blueprint (Prisma)
 
 ```prisma
+enum TableStatus {
+  VACANT
+  OCCUPIED
+  WAITING_PAYMENT
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  SERVED
+  PAID
+  CANCELLED
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
-  password     String   // Hashed bcrypt/argon2
+  password     String
   name         String
-  refreshToken String?  // Hashed Refresh Token untuk Revocation Strategy
+  refreshToken String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -79,25 +110,63 @@ model Category {
   name      String
   slug      String     @unique
   sortOrder Int        @default(0)
-  menuItems MenuItem[]
+  deletedAt DateTime?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+  menuItems MenuItem[]
 }
 
 model MenuItem {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   name        String
   description String?
-  price       Decimal  @db.Decimal(10, 2)
+  price       Decimal     @db.Decimal(10, 2)
   imageUrl    String?
-  isAvailable Boolean  @default(true)
+  isAvailable Boolean     @default(true)
   categoryId  String
-  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  deletedAt   DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
 
-  @@index([categoryId])
-  @@index([isAvailable])
+model Table {
+  id                 String      @id @default(uuid())
+  number             String      @unique // Meja 01, Meja 02, VIP-1
+  status             TableStatus @default(VACANT)
+  activeCustomerName String?
+  orders             Order[]
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
+
+model Order {
+  id           String      @id @default(uuid())
+  orderNumber  String      @unique // #ORD-20260807-001
+  tableId      String
+  table        Table       @relation(fields: [tableId], references: [id])
+  customerName String
+  status       OrderStatus @default(PENDING)
+  totalAmount  Decimal     @db.Decimal(10, 2)
+  orderItems   OrderItem[]
+  paidAt       DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model OrderItem {
+  id               String   @id @default(uuid())
+  orderId          String
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId       String
+  menuItem         MenuItem @relation(fields: [menuItemId], references: [id])
+  menuNameSnapshot String
+  priceSnapshot    Decimal  @db.Decimal(10, 2)
+  quantity         Int
+  subtotal         Decimal  @db.Decimal(10, 2)
+  notes            String?
+  createdAt        DateTime @default(now())
 }
 ```
 
@@ -107,17 +176,7 @@ model MenuItem {
 
 - **Database**: `prisma`, `@prisma/client`
 - **Auth Strategy**: `@nestjs/jwt`, `@nestjs/passport`, `passport`, `passport-jwt`, `bcrypt`, `@types/bcrypt`
-- **Validation**: `zod`, `nestjs-zod` *(Menggantikan class-validator untuk Zod Schema type-safety)*
+- **Validation**: `zod`, `nestjs-zod`
 - **Security & Enkripsi**: `node:crypto` (Native Node.js AES-256-GCM)
-- **Config**: `@nestjs/config`
-- **Docs**: `@nestjs/swagger`, `swagger-ui-express`, `nestjs-zod` (Auto OpenAPI integration)
-
----
-
-## 📝 Open Discussion / Unfinished Notes
-
-- [x] Tambahkan Zod validation type.
-- [x] Terapkan strategi Access Token + Refresh Token.
-- [x] Strategi Payload Encryption/Decryption Handshake (Tersimpan di `docs/security/encryption-decryption-strategy.md`).
-- [ ] Penentuan strategi upload foto (Local Static Upload vs Cloud Storage Cloudinary/S3).
-- [ ] Fitur simulasi Order Cart: Apakah perlu simpan temporary order di backend atau cukup client-side state?
+- **Config & Logging**: `@nestjs/config`, `nestjs-pino`, `pino-http`, `pino-roll`
+- **Docs**: `@nestjs/swagger`, `swagger-ui-express`
