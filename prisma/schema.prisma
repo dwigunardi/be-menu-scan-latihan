@@ -36,7 +36,7 @@ model User {
   @@map("users")
 }
 
-/// Category Model for grouping Menu Items (e.g., Makanan, Minuman, Dessert)
+/// Category Model for grouping Menu Items (e.g., Coffee, Beverages, Local Favorites, Snacks, Desserts)
 model Category {
   id        String     @id @default(uuid())
   name      String
@@ -51,27 +51,81 @@ model Category {
   @@map("categories")
 }
 
-/// Menu Item Model representing dishes, drinks, and desserts
+/// Menu Item Model representing cafe dishes, drinks, snacks, and desserts
 model MenuItem {
-  id          String      @id @default(uuid())
-  name        String
-  description String?
-  price       Decimal     @db.Decimal(10, 2)
-  imageUrl    String?     @map("image_url")
-  isAvailable Boolean     @default(true) @map("is_available")
-  categoryId  String      @map("category_id")
-  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  orderItems  OrderItem[]
-  deletedAt   DateTime?   @map("deleted_at")
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
+  id            String                  @id @default(uuid())
+  name          String
+  description   String?
+  price         Decimal                 @db.Decimal(10, 2)
+  promoPrice    Decimal?                @db.Decimal(10, 2) @map("promo_price")
+  imageUrl      String?                 @map("image_url")
+  rating        Decimal                 @default(5.0) @db.Decimal(2, 1)
+  reviewCount   Int                     @default(0) @map("review_count")
+  isAvailable   Boolean                 @default(true) @map("is_available")
+  isBestSeller  Boolean                 @default(false) @map("is_best_seller")
+  isRecommended Boolean                 @default(false) @map("is_recommended")
+  categoryId    String                  @map("category_id")
+  category      Category                @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  variantGroups MenuItemVariantGroup[]
+  orderItems    OrderItem[]
+  deletedAt     DateTime?               @map("deleted_at")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
 
   // Indexes for high-performance public & admin queries
   @@index([categoryId, isAvailable])
   @@index([categoryId, deletedAt])
   @@index([isAvailable])
+  @@index([isBestSeller])
+  @@index([isRecommended])
   @@index([deletedAt])
   @@map("menu_items")
+}
+
+/// Variant Group for Menu Items (e.g., "Pilih Ukuran", "Level Pedas", "Extra Topping")
+model MenuItemVariantGroup {
+  id         String                  @id @default(uuid())
+  menuItemId String                  @map("menu_item_id")
+  menuItem   MenuItem                @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name       String                  // e.g., "Ukuran", "Extra Add-ons"
+  isRequired Boolean                 @default(false) @map("is_required") // Mandatory choice (e.g. Size) vs Optional (e.g. Extra Shot)
+  minSelect  Int                     @default(0) @map("min_select") // 0 for optional, 1 for required
+  maxSelect  Int                     @default(1) @map("max_select") // 1 for single choice, >1 for multiple checkboxes
+  options    MenuItemVariantOption[]
+  createdAt  DateTime                @default(now()) @map("created_at")
+
+  @@index([menuItemId])
+  @@map("menu_item_variant_groups")
+}
+
+/// Variant Option Item (e.g., "Large (+Rp 5.000)", "Extra Shot (+Rp 5.000)", "No Sugar (+Rp 0)")
+model MenuItemVariantOption {
+  id             String               @id @default(uuid())
+  variantGroupId String               @map("variant_group_id")
+  variantGroup   MenuItemVariantGroup @relation(fields: [variantGroupId], references: [id], onDelete: Cascade)
+  name           String               // e.g., "Regular", "Large", "Extra Shot Espresso"
+  extraPrice     Decimal              @default(0.00) @db.Decimal(10, 2) @map("extra_price")
+  isAvailable    Boolean              @default(true) @map("is_available")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  @@index([variantGroupId])
+  @@map("menu_item_variant_options")
+}
+
+/// Promotional Banner Model for Cafe Home Carousel/Banners
+model PromoBanner {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  imageUrl    String   @map("image_url")
+  targetUrl   String?  @map("target_url") // Optional link to menu item or category
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("promo_banners")
 }
 
 /// Restaurant Table Model for QR Code Binding & Table Status Management
@@ -108,21 +162,36 @@ model Order {
   @@map("orders")
 }
 
-/// Order Item Detail Model with Snapshot of Name & Price
+/// Order Item Detail Model with Snapshot of Name, Price, and Selected Variants
 model OrderItem {
-  id               String   @id @default(uuid())
-  orderId          String   @map("order_id")
-  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  menuItemId       String   @map("menu_item_id")
-  menuItem         MenuItem @relation(fields: [menuItemId], references: [id])
-  menuNameSnapshot String   @map("menu_name_snapshot")
-  priceSnapshot    Decimal  @db.Decimal(10, 2) @map("price_snapshot")
+  id               String             @id @default(uuid())
+  orderId          String             @map("order_id")
+  order            Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId       String             @map("menu_item_id")
+  menuItem         MenuItem           @relation(fields: [menuItemId], references: [id])
+  menuNameSnapshot String             @map("menu_name_snapshot")
+  priceSnapshot    Decimal            @db.Decimal(10, 2) @map("price_snapshot")
   quantity         Int
-  subtotal         Decimal  @db.Decimal(10, 2)
+  subtotal         Decimal            @db.Decimal(10, 2)
   notes            String?
-  createdAt        DateTime @default(now()) @map("created_at")
+  selectedVariants OrderItemVariant[]
+  createdAt        DateTime           @default(now()) @map("created_at")
 
   @@index([orderId])
   @@index([menuItemId])
   @@map("order_items")
+}
+
+/// Snapshot of Selected Variants/Add-ons for Order Items
+model OrderItemVariant {
+  id                 String    @id @default(uuid())
+  orderItemId        String    @map("order_item_id")
+  orderItem          OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  groupNameSnapshot  String    @map("group_name_snapshot")  // e.g. "Ukuran"
+  optionNameSnapshot String    @map("option_name_snapshot") // e.g. "Large"
+  extraPriceSnapshot Decimal   @default(0.00) @db.Decimal(10, 2) @map("extra_price_snapshot")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  @@index([orderItemId])
+  @@map("order_item_variants")
 }
