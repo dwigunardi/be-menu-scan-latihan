@@ -13,8 +13,8 @@
 | :--- | :--- | :---: | :---: |
 | **Phase 0** | Planning, Architecture & Database Setup | ✅ **DONE** | 100% |
 | **Phase 1** | Core Foundation & Infrastructure Modules | ✅ **DONE** | 100% |
-| **Phase 2** | Global Security, Validation & Swagger | ⏳ **IN PROGRESS** | 0% |
-| **Phase 3** | Feature Domain Modules (Business Logic) | ⬜ **PENDING** | 0% |
+| **Phase 2** | Global Security, Validation & Swagger | ✅ **DONE** | 100% |
+| **Phase 3** | Feature Domain Modules (Business Logic) | ⏳ **IN PROGRESS** | 0% |
 | **Phase 4** | Seeding, Verification & Finalization | ⬜ **PENDING** | 0% |
 
 ---
@@ -65,18 +65,19 @@
 
 ---
 
-## 🛡️ Phase 2: Global Security, Validation & Swagger
+## ✅ Phase 2: Global Security, Validation & Swagger (COMPLETED)
 
-- [ ] **2.1. Zod Validation Pipe Integration** (`nestjs-zod`)
-  - Integrasi global `ZodValidationPipe` pada `main.ts`.
-- [ ] **2.2. Global Exception Filter** (`src/common/filters/`)
-  - `GlobalExceptionFilter` (Tangkap ZodError, PrismaError, & HttpException).
-- [ ] **2.3. Custom Decorators** (`src/common/decorators/`)
-  - `@Public()` -> Bypass JWT Guard.
-  - `@SkipEncryption()` -> Bypass Payload Encryption.
-  - `@CurrentUser()` -> Extract `req.user`.
-- [ ] **2.4. Swagger OpenAPI Setup** (`main.ts`)
-  - Pasang Swagger UI pada `/api/docs` yang terintegrasi dengan DTO Zod.
+- [x] **2.1. Custom Decorators** (`src/common/decorators/`)
+  - [public.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/public.decorator.ts) -> Bypass JWT Guard.
+  - [current-user.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/current-user.decorator.ts) -> Extract `req.user`.
+  - [skip-encryption.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/skip-encryption.decorator.ts) -> Bypass Payload Encryption.
+- [x] **2.2. Global Exception Filter** (`src/common/filters/`)
+  - [global-exception.filter.ts](file:///d:/code/be-menu-scan-latihan/src/common/filters/global-exception.filter.ts) (Penanganan error terpusat ZodError, PrismaError, & HttpException dengan tag `step: "EXCEPTION_CATCH"`).
+- [x] **2.3. Zod Validation Pipe & Response Transformation** (`nestjs-zod`)
+  - Integrasi `ZodValidationPipe` global di [main.ts](file:///d:/code/be-menu-scan-latihan/src/main.ts).
+  - [transform.interceptor.ts](file:///d:/code/be-menu-scan-latihan/src/common/interceptors/transform.interceptor.ts) untuk standarisasi format response JSON.
+- [x] **2.4. Swagger OpenAPI Setup** (`main.ts`)
+  - Dokumentasi Swagger OpenAPI interaktif di `/api/docs` lengkap dengan JWT BearerAuth & Header `x-handshake-token`.
 
 ---
 
