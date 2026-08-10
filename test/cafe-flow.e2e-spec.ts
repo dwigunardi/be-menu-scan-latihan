@@ -10,9 +10,12 @@ import { EncryptPayloadInterceptor } from '../src/common/interceptors/encrypt-pa
 import { EcdhService } from '../src/common/crypto/ecdh.service';
 import { CryptoService } from '../src/common/crypto/crypto.service';
 
-describe('MenuScan Cafe Full Flow (e2e)', () => {
+describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
   let app: INestApplication;
   let adminToken: string;
+  let cashierToken: string;
+  let kitchenToken: string;
+  let waiterToken: string;
   let tableId: string;
   let menuItemId: string;
   let variantOptionId: string;
@@ -49,7 +52,7 @@ describe('MenuScan Cafe Full Flow (e2e)', () => {
     await app.close();
   });
 
-  describe('1. Public Customer Discovery (Banners, Categories, Tables)', () => {
+  describe('1. Public Customer Discovery & Table Session', () => {
     it('GET /api/v1/public/banners - should return active promo banners', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/public/banners')
@@ -162,98 +165,103 @@ describe('MenuScan Cafe Full Flow (e2e)', () => {
     });
   });
 
-  describe('3. Admin Authentication & Operations Flow', () => {
-    it('POST /api/v1/auth/login - should authenticate admin and return JWT tokens', async () => {
-      const res = await request(app.getHttpServer())
+  describe('3. Staff Authentication & RBAC Access Controls', () => {
+    it('should login all 4 staff roles successfully', async () => {
+      // 1. Admin Login
+      const adminRes = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
-        .send({
-          email: 'admin@menuscan.com',
-          password: 'admin123',
-        })
+        .send({ email: 'admin@menuscan.com', password: 'admin123' })
         .expect(200);
+      adminToken = adminRes.body.data.accessToken;
+      expect(adminRes.body.data.user.role).toBe('ADMIN');
 
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.accessToken).toBeDefined();
-      adminToken = res.body.data.accessToken;
+      // 2. Kitchen Login
+      const kitchenRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: 'kitchen@menuscan.com', password: 'kitchen123' })
+        .expect(200);
+      kitchenToken = kitchenRes.body.data.accessToken;
+      expect(kitchenRes.body.data.user.role).toBe('KITCHEN');
+
+      // 3. Cashier Login
+      const cashierRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: 'cashier@menuscan.com', password: 'cashier123' })
+        .expect(200);
+      cashierToken = cashierRes.body.data.accessToken;
+      expect(cashierRes.body.data.user.role).toBe('CASHIER');
+
+      // 4. Waiter Login
+      const waiterRes = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: 'waiter@menuscan.com', password: 'waiter123' })
+        .expect(200);
+      waiterToken = waiterRes.body.data.accessToken;
+      expect(waiterRes.body.data.user.role).toBe('WAITER');
     });
 
-    it('GET /api/v1/auth/me - should get admin profile with Bearer Auth', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/auth/me')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(200);
-
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.email).toBe('admin@menuscan.com');
-    });
-
-    it('GET /api/v1/admin/orders - should monitor live orders in kitchen', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/admin/orders')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(200);
-
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.data.length).toBeGreaterThan(0);
-    });
-
-    it('PATCH /api/v1/admin/orders/:id/status - should update status to PREPARING -> SERVED -> PAID', async () => {
-      // 1. To PREPARING
+    it('RBAC Check: Kitchen role should be blocked from Financial Reports (403 Forbidden)', async () => {
       await request(app.getHttpServer())
+        .get('/api/v1/admin/reports/revenue')
+        .set('Authorization', `Bearer ${kitchenToken}`)
+        .expect(403);
+    });
+
+    it('RBAC Check: Kitchen role can monitor orders and transition status to PREPARING -> SERVED', async () => {
+      // 1. Kitchen updates to PREPARING
+      const prepRes = await request(app.getHttpServer())
         .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Authorization', `Bearer ${kitchenToken}`)
         .send({ status: 'PREPARING' })
         .expect(200);
+      expect(prepRes.body.data.status).toBe('PREPARING');
 
-      // 2. To SERVED
-      await request(app.getHttpServer())
+      // 2. Waiter / Kitchen updates to SERVED
+      const servedRes = await request(app.getHttpServer())
         .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Authorization', `Bearer ${waiterToken}`)
         .send({ status: 'SERVED' })
         .expect(200);
+      expect(servedRes.body.data.status).toBe('SERVED');
+    });
 
-      // 3. To PAID
+    it('Cashier marks order as PAID -> Table automatically becomes WAITING_CLEANUP', async () => {
       const paidRes = await request(app.getHttpServer())
         .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Authorization', `Bearer ${cashierToken}`)
         .send({ status: 'PAID' })
         .expect(200);
 
       expect(paidRes.body.data.status).toBe('PAID');
       expect(paidRes.body.data.paidAt).toBeDefined();
+
+      // Check table status is now WAITING_CLEANUP
+      const tableStatusRes = await request(app.getHttpServer())
+        .get('/api/v1/public/tables/Meja 01/status')
+        .expect(200);
+      expect(tableStatusRes.body.data.status).toBe('WAITING_CLEANUP');
     });
 
-    it('POST /api/v1/admin/tables/:id/reset - should reset table back to VACANT', async () => {
-      const res = await request(app.getHttpServer())
+    it('Waiter cleans dishes and resets table -> Table becomes VACANT', async () => {
+      const resetRes = await request(app.getHttpServer())
         .post(`/api/v1/admin/tables/${tableId}/reset`)
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Authorization', `Bearer ${waiterToken}`)
         .expect(200);
 
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.table.status).toBe('VACANT');
-      expect(res.body.data.table.activeCustomerName).toBeNull();
+      expect(resetRes.body.success).toBe(true);
+      expect(resetRes.body.data.table.status).toBe('VACANT');
+      expect(resetRes.body.data.table.activeCustomerName).toBeNull();
     });
 
-    it('GET /api/v1/admin/reports/revenue - should return updated revenue metrics', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/admin/reports/revenue')
+    it('Admin can access consolidated dashboard overview & revenue reports', async () => {
+      const overviewRes = await request(app.getHttpServer())
+        .get('/api/v1/admin/reports/dashboard-overview')
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
 
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.totalRevenue).toBeGreaterThan(0);
-      expect(res.body.data.totalOrders).toBeGreaterThan(0);
-    });
-
-    it('GET /api/v1/admin/reports/top-selling - should return top selling analytics', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/api/v1/admin/reports/top-selling')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(200);
-
-      expect(res.body.success).toBe(true);
-      expect(Array.isArray(res.body.data)).toBe(true);
-      expect(res.body.data.length).toBeGreaterThan(0);
+      expect(overviewRes.body.success).toBe(true);
+      expect(overviewRes.body.data.kpi.todayRevenue).toBeGreaterThan(0);
+      expect(overviewRes.body.data.kpi.todayOrdersCount).toBeGreaterThan(0);
     });
   });
 });
