@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { UserRole } from '@prisma/client';
 import { JwtStrategy, JwtPayload } from './jwt.strategy';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 
@@ -31,12 +32,14 @@ describe('JwtStrategy', () => {
       sub: 'user-uuid-1',
       email: 'admin@menuscan.com',
       name: 'Admin User',
+      role: UserRole.ADMIN,
     };
 
     const mockUser = {
       id: 'user-uuid-1',
       email: 'admin@menuscan.com',
       name: 'Admin User',
+      role: UserRole.ADMIN,
       createdAt: new Date(),
     };
 
@@ -50,6 +53,7 @@ describe('JwtStrategy', () => {
         id: true,
         email: true,
         name: true,
+        role: true,
         createdAt: true,
       },
     });
@@ -60,6 +64,7 @@ describe('JwtStrategy', () => {
       sub: 'non-existent-user',
       email: 'admin@menuscan.com',
       name: 'Admin User',
+      role: UserRole.ADMIN,
     };
 
     (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
