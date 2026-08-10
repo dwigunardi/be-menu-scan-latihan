@@ -20,6 +20,16 @@ export const envSchema = z.object({
   APP_SECRET: z.string().min(16, 'APP_SECRET must be at least 16 characters'),
   HANDSHAKE_SESSION_TTL: z.coerce.number().default(7200),
 
+  // Redis Configuration
+  REDIS_HOST: z.string().default('localhost'),
+  REDIS_PORT: z.coerce.number().default(6379),
+  REDIS_PASSWORD: z.string().default(''),
+  REDIS_DB: z.coerce.number().default(0),
+  REDIS_ENABLED: z.coerce.boolean().default(true),
+
+  // Payment Gateway
+  PAYMENT_WEBHOOK_SECRET: z.string().default('menuscan_payment_secret_123456789'),
+
   // Logging Strategy
   LOG_TO_FILE: z.coerce.boolean().default(false),
   LOG_FILE_PATH: z.string().default('./logs'),
