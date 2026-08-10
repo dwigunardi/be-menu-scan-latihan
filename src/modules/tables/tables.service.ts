@@ -11,6 +11,7 @@ export const TableStatus = {
   VACANT: 'VACANT',
   OCCUPIED: 'OCCUPIED',
   WAITING_PAYMENT: 'WAITING_PAYMENT',
+  WAITING_CLEANUP: 'WAITING_CLEANUP',
 } as const;
 export type TableStatus = (typeof TableStatus)[keyof typeof TableStatus];
 
@@ -21,7 +22,7 @@ export class TablesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Public: Check table status and active customer by table number
+   * Public: Check table status, active customer, and persistent order history
    */
   async getTableStatus(tableNumber: string) {
     const table = await this.prisma.table.findUnique({
@@ -29,10 +30,17 @@ export class TablesService {
       include: {
         orders: {
           where: {
-            status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
+            status: { in: ['PENDING', 'PREPARING', 'SERVED', 'PAID'] },
           },
           orderBy: { createdAt: 'desc' },
-          take: 1,
+          include: {
+            orderItems: {
+              include: {
+                selectedVariants: true,
+              },
+            },
+          },
+          take: 10,
         },
       },
     });
@@ -48,6 +56,23 @@ export class TablesService {
       activeCustomerName: table.activeCustomerName,
       activeOrderId: table.orders[0]?.id || null,
       activeOrderNumber: table.orders[0]?.orderNumber || null,
+      activeOrders: (table.orders || []).map((ord) => ({
+        id: ord.id,
+        orderNumber: ord.orderNumber,
+        status: ord.status,
+        totalAmount: Number(ord.totalAmount),
+        paidAt: ord.paidAt,
+        createdAt: ord.createdAt,
+        items: (ord.orderItems || []).map((item) => ({
+          name: item.menuNameSnapshot,
+          quantity: item.quantity,
+          subtotal: Number(item.subtotal),
+          selectedVariants: (item.selectedVariants || []).map((v) => ({
+            groupName: v.groupNameSnapshot,
+            optionName: v.optionNameSnapshot,
+          })),
+        })),
+      })),
     };
   }
 
@@ -64,7 +89,7 @@ export class TablesService {
     }
 
     const updated = await this.prisma.table.update({
-      where: { id: table.id },
+      where: { number: tableNumber },
       data: {
         status: TableStatus.OCCUPIED,
         activeCustomerName: dto.customerName,
@@ -73,10 +98,9 @@ export class TablesService {
 
     this.logger.log({
       step: 'TABLE_SESSION_INIT',
-      tableId: table.id,
-      tableNumber: table.number,
+      tableNumber,
       customerName: dto.customerName,
-      msg: `Customer "${dto.customerName}" initialized session on ${table.number}`,
+      msg: `Session initialized for table ${tableNumber} by ${dto.customerName}`,
     });
 
     return {
@@ -88,13 +112,11 @@ export class TablesService {
   }
 
   /**
-   * Admin: List all tables with status and active orders
+   * Admin: Find all tables
    */
   async findAllAdmin() {
     return this.prisma.table.findMany({
-      orderBy: {
-        number: 'asc',
-      },
+      orderBy: { number: 'asc' },
       include: {
         orders: {
           where: {
@@ -116,7 +138,7 @@ export class TablesService {
     });
 
     if (existing) {
-      throw new ConflictException(`Table with number "${dto.number}" already exists`);
+      throw new ConflictException(`Table "${dto.number}" already exists`);
     }
 
     const table = await this.prisma.table.create({
@@ -137,7 +159,7 @@ export class TablesService {
   }
 
   /**
-   * Admin: Reset table status to VACANT
+   * Admin / Waiter: Reset table status to VACANT
    */
   async resetTable(id: string) {
     const table = await this.prisma.table.findUnique({
@@ -178,7 +200,9 @@ export class TablesService {
       where: { id },
       include: {
         orders: {
-          where: { status: { in: ['PENDING', 'PREPARING', 'SERVED'] } },
+          where: {
+            status: { in: ['PENDING', 'PREPARING'] },
+          },
         },
       },
     });
@@ -189,7 +213,7 @@ export class TablesService {
 
     if (table.orders.length > 0) {
       throw new ConflictException(
-        `Cannot delete table ${table.number} with active orders`,
+        `Cannot delete table ${table.number} because it has active pending orders`,
       );
     }
 

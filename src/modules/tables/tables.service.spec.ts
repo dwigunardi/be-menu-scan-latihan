@@ -43,24 +43,46 @@ describe('TablesService', () => {
   });
 
   describe('getTableStatus', () => {
-    it('should return table status with null activeOrder when no orders', async () => {
+    it('should return table status with empty activeOrders when no orders', async () => {
       prismaService.table.findUnique.mockResolvedValue(mockTable);
 
       const result = await service.getTableStatus('Meja 01');
       expect(result.number).toBe('Meja 01');
       expect(result.status).toBe(TableStatus.VACANT);
       expect(result.activeOrderId).toBeNull();
+      expect(result.activeOrders).toEqual([]);
     });
 
-    it('should return activeOrderId when table has active order', async () => {
+    it('should return activeOrderId and activeOrders when table has active orders', async () => {
       prismaService.table.findUnique.mockResolvedValue({
         ...mockTable,
-        orders: [{ id: 'order-1', orderNumber: 'ORD-001' }],
+        orders: [
+          {
+            id: 'order-1',
+            orderNumber: 'ORD-001',
+            status: 'PAID',
+            totalAmount: 50000,
+            paidAt: new Date(),
+            createdAt: new Date(),
+            orderItems: [
+              {
+                menuNameSnapshot: 'Caramel Macchiato',
+                quantity: 1,
+                subtotal: 50000,
+                selectedVariants: [
+                  { groupNameSnapshot: 'Ukuran', optionNameSnapshot: 'Large' },
+                ],
+              },
+            ],
+          },
+        ],
       });
 
       const result = await service.getTableStatus('Meja 01');
       expect(result.activeOrderId).toBe('order-1');
       expect(result.activeOrderNumber).toBe('ORD-001');
+      expect(result.activeOrders).toHaveLength(1);
+      expect(result.activeOrders[0].items[0].name).toBe('Caramel Macchiato');
     });
 
     it('should throw NotFoundException if table not found', async () => {
@@ -89,7 +111,7 @@ describe('TablesService', () => {
       expect(result.status).toBe(TableStatus.OCCUPIED);
     });
 
-    it('should throw NotFoundException if table not found', async () => {
+    it('should throw NotFoundException if table not found when initializing session', async () => {
       prismaService.table.findUnique.mockResolvedValue(null);
 
       await expect(
@@ -99,25 +121,42 @@ describe('TablesService', () => {
   });
 
   describe('findAllAdmin', () => {
-    it('should return all tables sorted by number', async () => {
+    it('should return all tables with orders', async () => {
       prismaService.table.findMany.mockResolvedValue([mockTable]);
 
       const result = await service.findAllAdmin();
-      expect(result).toHaveLength(1);
-      expect(prismaService.table.findMany).toHaveBeenCalled();
+      expect(result).toEqual([mockTable]);
+      expect(prismaService.table.findMany).toHaveBeenCalledWith({
+        orderBy: { number: 'asc' },
+        include: {
+          orders: {
+            where: {
+              status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
     });
   });
 
   describe('create', () => {
-    it('should create new table', async () => {
+    it('should create new table when table number is unique', async () => {
       prismaService.table.findUnique.mockResolvedValue(null);
       prismaService.table.create.mockResolvedValue(mockTable);
 
       const result = await service.create({ number: 'Meja 01' });
-      expect(result.number).toBe('Meja 01');
+      expect(result).toEqual(mockTable);
+      expect(prismaService.table.create).toHaveBeenCalledWith({
+        data: {
+          number: 'Meja 01',
+          status: TableStatus.VACANT,
+        },
+      });
     });
 
-    it('should throw ConflictException if number exists', async () => {
+    it('should throw ConflictException if table number already exists', async () => {
       prismaService.table.findUnique.mockResolvedValue(mockTable);
 
       await expect(service.create({ number: 'Meja 01' })).rejects.toThrow(
@@ -127,8 +166,12 @@ describe('TablesService', () => {
   });
 
   describe('resetTable', () => {
-    it('should set table status back to VACANT', async () => {
-      prismaService.table.findUnique.mockResolvedValue(mockTable);
+    it('should reset table status to VACANT and clear active customer', async () => {
+      prismaService.table.findUnique.mockResolvedValue({
+        ...mockTable,
+        status: TableStatus.OCCUPIED,
+        activeCustomerName: 'John Doe',
+      });
       prismaService.table.update.mockResolvedValue({
         ...mockTable,
         status: TableStatus.VACANT,
@@ -138,6 +181,7 @@ describe('TablesService', () => {
       const result = await service.resetTable('table-123');
       expect(result.success).toBe(true);
       expect(result.table.status).toBe(TableStatus.VACANT);
+      expect(result.table.activeCustomerName).toBeNull();
     });
 
     it('should throw NotFoundException if table to reset not found', async () => {
@@ -150,7 +194,7 @@ describe('TablesService', () => {
   });
 
   describe('remove', () => {
-    it('should delete table successfully when no active orders', async () => {
+    it('should delete table if no pending or preparing orders', async () => {
       prismaService.table.findUnique.mockResolvedValue({
         ...mockTable,
         orders: [],
@@ -164,22 +208,22 @@ describe('TablesService', () => {
       });
     });
 
+    it('should throw ConflictException if table has active orders', async () => {
+      prismaService.table.findUnique.mockResolvedValue({
+        ...mockTable,
+        orders: [{ id: 'order-1', status: 'PENDING' }],
+      });
+
+      await expect(service.remove('table-123')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
     it('should throw NotFoundException if table to delete not found', async () => {
       prismaService.table.findUnique.mockResolvedValue(null);
 
       await expect(service.remove('invalid-id')).rejects.toThrow(
         NotFoundException,
-      );
-    });
-
-    it('should throw ConflictException if table has active orders', async () => {
-      prismaService.table.findUnique.mockResolvedValue({
-        ...mockTable,
-        orders: [{ id: 'ord-1', status: 'PENDING' }],
-      });
-
-      await expect(service.remove('table-123')).rejects.toThrow(
-        ConflictException,
       );
     });
   });
