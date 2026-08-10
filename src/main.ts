@@ -43,7 +43,7 @@ async function bootstrap() {
   const cryptoService = app.get(CryptoService);
 
   app.useGlobalInterceptors(
-    new TransformInterceptor(),
+    new TransformInterceptor(reflector),
     new EncryptPayloadInterceptor(reflector, ecdhService, cryptoService),
   );
 
@@ -58,7 +58,6 @@ async function bootstrap() {
         scheme: 'bearer',
         bearerFormat: 'JWT',
         name: 'Authorization',
-        description: 'Enter JWT Access Token',
         in: 'header',
       },
       'JWT-auth',
@@ -68,18 +67,21 @@ async function bootstrap() {
         type: 'apiKey',
         name: 'x-handshake-token',
         in: 'header',
-        description: 'Handshake Token for AES-256-GCM Payload Encryption',
+        description: 'Session handshake token returned from /api/v1/auth/handshake',
       },
-      'Handshake-token',
+      'x-handshake-token',
     )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
 
   await app.listen(port);
-  app.get(Logger).log(`🚀 Server running on http://localhost:${port}/api/v1`);
-  app.get(Logger).log(`📚 Swagger Docs available on http://localhost:${port}/api/docs`);
+  console.log(`🚀 MenuScan Server running on http://localhost:${port}/api/v1`);
+  console.log(`📚 Swagger OpenAPI documentation available on http://localhost:${port}/api/docs`);
 }
-
 bootstrap();
