@@ -9,9 +9,11 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { TablesService } from './tables.service';
 import { CreateTableDto, TableSessionDto } from './dto/table.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Tables')
 @Controller()
@@ -45,21 +47,23 @@ export class TablesController {
   }
 
   // -------------------------------------------------------------
-  // Admin Endpoints
+  // Admin & Staff Endpoints (Floor Plan & Table Bussing/Cleaning)
   // -------------------------------------------------------------
 
   @Get('admin/tables')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'List all tables with status and active orders' })
+  @ApiOperation({ summary: 'Staff list all tables with status and floor occupancy' })
   @ApiResponse({ status: 200, description: 'List of all tables' })
   async getAdminTables() {
     return this.tablesService.findAllAdmin();
   }
 
   @Post('admin/tables')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Create new restaurant table' })
+  @ApiOperation({ summary: 'Admin create new restaurant table' })
   @ApiResponse({ status: 201, description: 'Table created' })
   @ApiResponse({ status: 409, description: 'Table number already exists' })
   async createTable(@Body() dto: CreateTableDto) {
@@ -67,9 +71,10 @@ export class TablesController {
   }
 
   @Post('admin/tables/:id/reset')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Reset table status to VACANT and clear active customer' })
+  @ApiOperation({ summary: 'Waiter/Cashier reset table status to VACANT after cleaning' })
   @ApiResponse({ status: 200, description: 'Table reset successfully' })
   @ApiResponse({ status: 404, description: 'Table not found' })
   async resetTable(@Param('id') id: string) {
@@ -77,8 +82,9 @@ export class TablesController {
   }
 
   @Delete('admin/tables/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Delete table (only if no active orders)' })
+  @ApiOperation({ summary: 'Admin delete table (only if no active orders)' })
   @ApiResponse({ status: 200, description: 'Table deleted' })
   @ApiResponse({ status: 404, description: 'Table not found' })
   @ApiResponse({ status: 409, description: 'Cannot delete table with active orders' })
