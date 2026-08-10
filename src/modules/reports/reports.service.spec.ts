@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ReportsService } from './reports.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { OrderStatus } from '../orders/orders.service';
 
 describe('ReportsService', () => {
   let service: ReportsService;
@@ -16,6 +17,21 @@ describe('ReportsService', () => {
         groupBy: jest.fn().mockResolvedValue([
           { status: 'PAID', _count: { id: 10 } },
         ]),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'ord-1',
+            orderNumber: 'ORD-001',
+            customerName: 'Budi',
+            status: OrderStatus.PENDING,
+            totalAmount: 50000,
+            table: { number: 'Meja 01' },
+            orderItems: [{ id: 'item-1', menuNameSnapshot: 'Latte', quantity: 2 }],
+            createdAt: new Date(),
+          },
+        ]),
+      },
+      table: {
+        count: jest.fn().mockResolvedValue(10),
       },
       orderItem: {
         groupBy: jest.fn().mockResolvedValue([
@@ -40,6 +56,49 @@ describe('ReportsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('getDashboardOverview', () => {
+    it('should aggregate all KPI cards, table occupancy, recent orders, and top products', async () => {
+      // Mock occupied tables count specifically
+      prismaService.table.count
+        .mockResolvedValueOnce(10) // total tables
+        .mockResolvedValueOnce(4); // occupied tables
+
+      const result = await service.getDashboardOverview();
+
+      expect(result.kpi.todayRevenue).toBe(500000);
+      expect(result.kpi.todayOrdersCount).toBe(10);
+      expect(result.kpi.activeOrdersCount).toBe(10);
+      expect(result.kpi.tableOccupancy.totalTables).toBe(10);
+      expect(result.kpi.tableOccupancy.occupiedTables).toBe(4);
+      expect(result.kpi.tableOccupancy.occupancyPercentage).toBe(40);
+      expect(result.recentOrders).toHaveLength(1);
+      expect(result.recentOrders[0].tableNumber).toBe('Meja 01');
+      expect(result.recentOrders[0].itemCount).toBe(2);
+      expect(result.topSellingToday).toHaveLength(1);
+      expect(result.topSellingToday[0].name).toBe('Caramel Macchiato');
+    });
+
+    it('should handle zero tables gracefully', async () => {
+      prismaService.table.count.mockResolvedValue(0);
+      prismaService.order.findMany.mockResolvedValue([
+        {
+          id: 'ord-2',
+          orderNumber: 'ORD-002',
+          customerName: 'Siti',
+          status: OrderStatus.PAID,
+          totalAmount: 25000,
+          table: null,
+          orderItems: [],
+          createdAt: new Date(),
+        },
+      ]);
+
+      const result = await service.getDashboardOverview();
+      expect(result.kpi.tableOccupancy.occupancyPercentage).toBe(0);
+      expect(result.recentOrders[0].tableNumber).toBe('-');
+    });
   });
 
   describe('getRevenueReport', () => {

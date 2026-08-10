@@ -8,6 +8,14 @@ import { QueryRevenueDto, QueryTopSellingDto } from './dto/report.dto';
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
+  @Get('dashboard-overview')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Admin single-call aggregated dashboard overview metrics' })
+  @ApiResponse({ status: 200, description: 'Consolidated dashboard metrics (KPI, Recent Orders, Top Selling)' })
+  async getDashboardOverview() {
+    return this.reportsService.getDashboardOverview();
+  }
+
   @Get('revenue')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Admin revenue, total orders, and average order value' })
