@@ -3,12 +3,14 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { EventsGateway } from '../events/events.gateway';
 import {
   CreateOrderDto,
-  UpdateOrderStatusDto,
   QueryOrderDto,
+  UpdateOrderStatusDto,
 } from './dto/order.dto';
 import { Prisma } from '@prisma/client';
 
@@ -21,29 +23,44 @@ export const OrderStatus = {
 } as const;
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
 
-export const TableStatus = {
-  VACANT: 'VACANT',
-  OCCUPIED: 'OCCUPIED',
-  WAITING_PAYMENT: 'WAITING_PAYMENT',
-} as const;
-export type TableStatus = (typeof TableStatus)[keyof typeof TableStatus];
-
-function generateOrderNumber(): string {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `ORD-${dateStr}-${randomSuffix}`;
-}
-
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly eventsGateway?: EventsGateway,
+  ) {}
 
   /**
-   * Public: Place a new order with cart items and selected modifiers
+   * Generates readable sequential order number: ORD-YYYYMMDD-XXX
+   */
+  private async generateOrderNumber(): Promise<string> {
+    const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const prefix = `ORD-${dateStr}`;
+
+    const countToday = await this.prisma.order.count({
+      where: {
+        orderNumber: {
+          startsWith: prefix,
+        },
+      },
+    });
+
+    const sequence = String(countToday + 1).padStart(3, '0');
+    return `${prefix}-${sequence}`;
+  }
+
+  /**
+   * Public: Place new customer order with nested variants snapshot in atomic transaction
    */
   async create(dto: CreateOrderDto) {
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('Order must contain at least one item');
+    }
+
+    // 1. Verify Table exists
     const table = await this.prisma.table.findUnique({
       where: { id: dto.tableId },
     });
@@ -52,7 +69,7 @@ export class OrdersService {
       throw new NotFoundException(`Table with ID ${dto.tableId} not found`);
     }
 
-    // Fetch all requested menu items to calculate accurate prices
+    // 2. Verify all MenuItems exist and are available
     const menuItemIds = dto.items.map((i) => i.menuItemId);
     const menuItems = await this.prisma.menuItem.findMany({
       where: {
@@ -61,21 +78,24 @@ export class OrdersService {
       },
     });
 
+    if (menuItems.length !== menuItemIds.length) {
+      throw new BadRequestException(
+        'One or more ordered menu items do not exist or have been deleted',
+      );
+    }
+
     const menuMap = new Map(menuItems.map((m) => [m.id, m]));
 
     for (const item of dto.items) {
       const menu = menuMap.get(item.menuItemId);
-      if (!menu) {
+      if (!menu?.isAvailable) {
         throw new BadRequestException(
-          `Menu item with ID ${item.menuItemId} is not available`,
+          `Menu item "${menu?.name}" is currently out of stock`,
         );
-      }
-      if (!menu.isAvailable) {
-        throw new BadRequestException(`Menu item "${menu.name}" is currently sold out`);
       }
     }
 
-    const orderNumber = generateOrderNumber();
+    const orderNumber = await this.generateOrderNumber();
 
     // Process order items in transaction
     const order = await this.prisma.$transaction(async (tx) => {
@@ -140,11 +160,11 @@ export class OrdersService {
         },
       });
 
-      // Update table status
+      // Update table to OCCUPIED and set active customer name
       await tx.table.update({
         where: { id: dto.tableId },
         data: {
-          status: TableStatus.OCCUPIED,
+          status: 'OCCUPIED' as any,
           activeCustomerName: dto.customerName,
         },
       });
@@ -156,17 +176,16 @@ export class OrdersService {
       step: 'ORDER_CREATE',
       orderId: order.id,
       orderNumber: order.orderNumber,
-      tableNumber: order.table.number,
       customerName: order.customerName,
       totalAmount: order.totalAmount,
-      msg: `Order ${order.orderNumber} placed successfully`,
+      msg: `Order ${order.orderNumber} placed for table ${table.number}`,
     });
 
     return order;
   }
 
   /**
-   * Public: Check order status by orderNumber
+   * Public: Track order status by orderNumber
    */
   async findByOrderNumber(orderNumber: string) {
     const order = await this.prisma.order.findUnique({
@@ -184,18 +203,18 @@ export class OrdersService {
     });
 
     if (!order) {
-      throw new NotFoundException(`Order with number "${orderNumber}" not found`);
+      throw new NotFoundException(`Order "${orderNumber}" not found`);
     }
 
     return order;
   }
 
   /**
-   * Admin: List live orders with filters and pagination
+   * Admin / Staff: List orders with filters (Live KDS Monitor)
    */
   async findAllAdmin(query: QueryOrderDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? query.limit : 20;
     const skip = (page - 1) * limit;
 
     const where: Prisma.OrderWhereInput = {};
@@ -250,7 +269,7 @@ export class OrdersService {
   }
 
   /**
-   * Admin: Update order status (PENDING -> PREPARING -> SERVED -> PAID / CANCELLED)
+   * Admin / Staff: Update order status (PENDING -> PAID -> PREPARING -> SERVED / CANCELLED)
    */
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
     const existing = await this.prisma.order.findUnique({
@@ -287,6 +306,14 @@ export class OrdersService {
         },
       },
     });
+
+    // Real-Time WebSocket Alerts
+    if (this.eventsGateway) {
+      if (dto.status === OrderStatus.PAID) {
+        this.eventsGateway.emitNewPaidOrder(updated);
+      }
+      this.eventsGateway.emitOrderStatusChanged(updated, updated.table?.number);
+    }
 
     this.logger.log({
       step: 'ORDER_STATUS_UPDATE',

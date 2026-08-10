@@ -19,10 +19,7 @@ describe('TablesController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TablesController],
       providers: [
-        {
-          provide: TablesService,
-          useValue: mockTablesService,
-        },
+        { provide: TablesService, useValue: mockTablesService },
       ],
     }).compile();
 
@@ -30,16 +27,12 @@ describe('TablesController', () => {
     tablesService = module.get(TablesService);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
   it('should be defined', () => {
     expect(controller).toBeDefined();
   });
 
   describe('getTableStatus', () => {
-    it('should return table status by table number', async () => {
+    it('should return table status from service', async () => {
       const tableStatus = { number: '01', status: 'VACANT', activeCustomerName: null };
       tablesService.getTableStatus.mockResolvedValue(tableStatus as any);
 
@@ -61,24 +54,24 @@ describe('TablesController', () => {
     });
   });
 
-  describe('getAdminTables', () => {
+  describe('findAllAdmin', () => {
     it('should return all tables for admin monitor', async () => {
       const tables = [{ id: 't1', number: '01', status: 'VACANT' }];
       tablesService.findAllAdmin.mockResolvedValue(tables as any);
 
-      const result = await controller.getAdminTables();
+      const result = await controller.findAllAdmin();
       expect(result).toEqual(tables);
       expect(tablesService.findAllAdmin).toHaveBeenCalled();
     });
   });
 
-  describe('createTable', () => {
+  describe('create', () => {
     it('should create new table and return created record', async () => {
       const dto = { number: 'Meja 11' };
       const created = { id: 't11', number: 'Meja 11', status: 'VACANT' };
       tablesService.create.mockResolvedValue(created as any);
 
-      const result = await controller.createTable(dto);
+      const result = await controller.create(dto);
       expect(result).toEqual(created);
       expect(tablesService.create).toHaveBeenCalledWith(dto);
     });
@@ -95,12 +88,12 @@ describe('TablesController', () => {
     });
   });
 
-  describe('deleteTable', () => {
+  describe('remove', () => {
     it('should delete table and return confirmation message', async () => {
       const response = { success: true, message: 'Table t1 deleted successfully' };
       tablesService.remove.mockResolvedValue(response as any);
 
-      const result = await controller.deleteTable('t1');
+      const result = await controller.remove('t1');
       expect(result).toEqual(response);
       expect(tablesService.remove).toHaveBeenCalledWith('t1');
     });

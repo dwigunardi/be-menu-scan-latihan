@@ -11,9 +11,14 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { TablesService } from './tables.service';
-import { CreateTableDto, TableSessionDto } from './dto/table.dto';
+import {
+  CreateTableDto,
+  TableSessionDto,
+  TableStatusResponseSchema,
+} from './dto/table.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { ZodResponse } from '../../common/decorators/zod-response.decorator';
 
 @ApiTags('Tables')
 @Controller()
@@ -25,6 +30,7 @@ export class TablesController {
   // -------------------------------------------------------------
 
   @Public()
+  @ZodResponse(TableStatusResponseSchema)
   @Get('public/tables/:number/status')
   @ApiOperation({ summary: 'Check table status & active customer by table number' })
   @ApiResponse({ status: 200, description: 'Table status details' })
@@ -47,48 +53,47 @@ export class TablesController {
   }
 
   // -------------------------------------------------------------
-  // Admin & Staff Endpoints (Floor Plan & Table Bussing/Cleaning)
+  // Admin & Staff Operations
   // -------------------------------------------------------------
 
-  @Get('admin/tables')
-  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Staff list all tables with status and floor occupancy' })
-  @ApiResponse({ status: 200, description: 'List of all tables' })
-  async getAdminTables() {
+  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
+  @Get('admin/tables')
+  @ApiOperation({ summary: 'List all cafe tables with current occupancy' })
+  @ApiResponse({ status: 200, description: 'All tables returned' })
+  async findAllAdmin() {
     return this.tablesService.findAllAdmin();
   }
 
-  @Post('admin/tables')
-  @Roles(UserRole.ADMIN)
-  @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin create new restaurant table' })
+  @Roles(UserRole.ADMIN)
+  @Post('admin/tables')
+  @ApiOperation({ summary: 'Create a new table' })
   @ApiResponse({ status: 201, description: 'Table created' })
   @ApiResponse({ status: 409, description: 'Table number already exists' })
-  async createTable(@Body() dto: CreateTableDto) {
+  async create(@Body() dto: CreateTableDto) {
     return this.tablesService.create(dto);
   }
 
-  @Post('admin/tables/:id/reset')
+  @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
   @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Waiter/Cashier reset table status to VACANT after cleaning' })
-  @ApiResponse({ status: 200, description: 'Table reset successfully' })
+  @Post('admin/tables/:id/reset')
+  @ApiOperation({ summary: 'Reset table session back to VACANT after guests leave' })
+  @ApiResponse({ status: 200, description: 'Table reset to VACANT' })
   @ApiResponse({ status: 404, description: 'Table not found' })
   async resetTable(@Param('id') id: string) {
     return this.tablesService.resetTable(id);
   }
 
-  @Delete('admin/tables/:id')
-  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin delete table (only if no active orders)' })
+  @Roles(UserRole.ADMIN)
+  @Delete('admin/tables/:id')
+  @ApiOperation({ summary: 'Delete table' })
   @ApiResponse({ status: 200, description: 'Table deleted' })
   @ApiResponse({ status: 404, description: 'Table not found' })
   @ApiResponse({ status: 409, description: 'Cannot delete table with active orders' })
-  async deleteTable(@Param('id') id: string) {
+  async remove(@Param('id') id: string) {
     return this.tablesService.remove(id);
   }
 }
