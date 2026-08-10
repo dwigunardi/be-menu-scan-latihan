@@ -10,7 +10,8 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { MenusService } from './menus.service';
 import {
   CreateMenuDto,
@@ -19,6 +20,7 @@ import {
   ToggleMenuStatusDto,
 } from './dto/menu.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Menus')
 @Controller()
@@ -51,10 +53,11 @@ export class MenusController {
   }
 
   // -------------------------------------------------------------
-  // Admin Endpoints
+  // Admin & Staff Endpoints
   // -------------------------------------------------------------
 
   @Get('admin/menus')
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Admin list all menus with pagination' })
   @ApiResponse({ status: 200, description: 'Paginated menu list' })
@@ -63,6 +66,7 @@ export class MenusController {
   }
 
   @Post('admin/menus')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
@@ -74,6 +78,7 @@ export class MenusController {
   }
 
   @Get('admin/menus/:id')
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Admin get menu detail' })
   @ApiResponse({ status: 200, description: 'Menu detail' })
@@ -83,6 +88,7 @@ export class MenusController {
   }
 
   @Patch('admin/menus/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Admin update menu item and variants' })
   @ApiResponse({ status: 200, description: 'Menu updated' })
@@ -95,8 +101,9 @@ export class MenusController {
   }
 
   @Patch('admin/menus/:id/status')
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin fast toggle availability status' })
+  @ApiOperation({ summary: 'Fast toggle availability status (In Stock / Out of Stock)' })
   @ApiResponse({ status: 200, description: 'Status updated' })
   async toggleStatus(
     @Param('id') id: string,
@@ -106,6 +113,7 @@ export class MenusController {
   }
 
   @Delete('admin/menus/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Admin soft delete menu item' })
   @ApiResponse({ status: 200, description: 'Menu deleted' })
