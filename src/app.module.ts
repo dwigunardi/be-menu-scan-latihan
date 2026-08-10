@@ -7,6 +7,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { DecryptPayloadMiddleware } from './common/middlewares/decrypt-payload.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 
 // Domain Feature Modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -43,6 +44,10 @@ import { AppService } from './app.service';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
   ],
 })
