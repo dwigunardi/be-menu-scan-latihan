@@ -2,6 +2,8 @@ import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { Public, IS_PUBLIC_KEY } from './public.decorator';
 import { SkipEncryption, IS_SKIP_ENCRYPTION_KEY } from './skip-encryption.decorator';
 import { CurrentUser } from './current-user.decorator';
+import { Roles, ROLES_KEY } from './roles.decorator';
+import { UserRole } from '@prisma/client';
 
 function getParamDecoratorFactory(decorator: Function) {
   class TestClass {
@@ -36,10 +38,22 @@ describe('Common Decorators', () => {
     });
   });
 
+  describe('Roles Decorator', () => {
+    it('should set metadata for ROLES_KEY with specified UserRoles', () => {
+      class TestController {
+        @Roles(UserRole.ADMIN, UserRole.CASHIER)
+        testEndpoint() {}
+      }
+
+      const roles = Reflect.getMetadata(ROLES_KEY, TestController.prototype.testEndpoint);
+      expect(roles).toEqual([UserRole.ADMIN, UserRole.CASHIER]);
+    });
+  });
+
   describe('CurrentUser Decorator', () => {
     it('should extract user object from request', () => {
       const factory = getParamDecoratorFactory(CurrentUser);
-      const mockUser = { id: 'user-123', email: 'test@admin.com', name: 'Admin' };
+      const mockUser = { id: 'user-123', email: 'test@admin.com', name: 'Admin', role: UserRole.ADMIN };
       const mockContext = {
         switchToHttp: () => ({
           getRequest: () => ({ user: mockUser }),
@@ -52,7 +66,7 @@ describe('Common Decorators', () => {
 
     it('should extract specific property from user object', () => {
       const factory = getParamDecoratorFactory(CurrentUser);
-      const mockUser = { id: 'user-123', email: 'test@admin.com', name: 'Admin' };
+      const mockUser = { id: 'user-123', email: 'test@admin.com', name: 'Admin', role: UserRole.ADMIN };
       const mockContext = {
         switchToHttp: () => ({
           getRequest: () => ({ user: mockUser }),

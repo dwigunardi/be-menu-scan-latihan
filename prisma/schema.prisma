@@ -9,10 +9,18 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserRole {
+  ADMIN
+  CASHIER
+  KITCHEN
+  WAITER
+}
+
 enum TableStatus {
   VACANT
   OCCUPIED
   WAITING_PAYMENT
+  WAITING_CLEANUP
 }
 
 enum OrderStatus {
@@ -29,6 +37,7 @@ model User {
   email        String   @unique
   password     String   // Hashed with bcrypt/argon2
   name         String
+  role         UserRole @default(ADMIN)
   refreshToken String?  // Hashed Refresh Token for revocation strategy
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
