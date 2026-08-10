@@ -15,24 +15,47 @@ async function main() {
   console.log('🌱 Starting MenuScan Database Seeding...');
 
   // -------------------------------------------------------------
-  // 1. Seed Admin Default User
+  // 1. Seed Staff Users (Admin, Cashier, Kitchen, Waiter)
   // -------------------------------------------------------------
-  const adminEmail = 'admin@menuscan.com';
-  const hashedPassword = await bcrypt.hash('admin123', 10);
+  const staffUsers = [
+    {
+      email: 'admin@menuscan.com',
+      password: await bcrypt.hash('admin123', 10),
+      name: 'Manager / Owner',
+      role: 'ADMIN' as const,
+    },
+    {
+      email: 'cashier@menuscan.com',
+      password: await bcrypt.hash('cashier123', 10),
+      name: 'Kasir Front POS',
+      role: 'CASHIER' as const,
+    },
+    {
+      email: 'kitchen@menuscan.com',
+      password: await bcrypt.hash('kitchen123', 10),
+      name: 'Head Chef / Barista',
+      role: 'KITCHEN' as const,
+    },
+    {
+      email: 'waiter@menuscan.com',
+      password: await bcrypt.hash('waiter123', 10),
+      name: 'Floor Staff / Waiter',
+      role: 'WAITER' as const,
+    },
+  ];
 
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {
-      password: hashedPassword,
-      name: 'Admin MenuScan',
-    },
-    create: {
-      email: adminEmail,
-      password: hashedPassword,
-      name: 'Admin MenuScan',
-    },
-  });
-  console.log(`✅ Admin user seeded: ${admin.email} (Password: admin123)`);
+  for (const staff of staffUsers) {
+    const user = await prisma.user.upsert({
+      where: { email: staff.email },
+      update: {
+        password: staff.password,
+        name: staff.name,
+        role: staff.role,
+      },
+      create: staff,
+    });
+    console.log(`✅ Staff user seeded: ${user.email} (Role: ${user.role})`);
+  }
 
   // -------------------------------------------------------------
   // 2. Seed Cafe Tables (Meja 01 s/d Meja 10)
@@ -381,41 +404,55 @@ async function main() {
     });
 
     if (existing) {
-      await prisma.menuItem.delete({ where: { id: existing.id } });
+      await prisma.menuItem.update({
+        where: { id: existing.id },
+        data: {
+          description: item.description,
+          price: item.price,
+          promoPrice: item.promoPrice,
+          imageUrl: item.imageUrl,
+          rating: item.rating,
+          reviewCount: item.reviewCount,
+          isAvailable: item.isAvailable,
+          isBestSeller: item.isBestSeller,
+          isRecommended: item.isRecommended,
+          categoryId,
+        },
+      });
+    } else {
+      await prisma.menuItem.create({
+        data: {
+          name: item.name,
+          description: item.description,
+          price: item.price,
+          promoPrice: item.promoPrice,
+          imageUrl: item.imageUrl,
+          rating: item.rating,
+          reviewCount: item.reviewCount,
+          isAvailable: item.isAvailable,
+          isBestSeller: item.isBestSeller,
+          isRecommended: item.isRecommended,
+          categoryId,
+          variantGroups: item.variantGroups.length > 0
+            ? {
+                create: item.variantGroups.map((vg) => ({
+                  name: vg.name,
+                  isRequired: vg.isRequired,
+                  minSelect: vg.minSelect,
+                  maxSelect: vg.maxSelect,
+                  options: {
+                    create: vg.options.map((opt) => ({
+                      name: opt.name,
+                      extraPrice: opt.extraPrice,
+                      isAvailable: opt.isAvailable,
+                    })),
+                  },
+                })),
+              }
+            : undefined,
+        },
+      });
     }
-
-    await prisma.menuItem.create({
-      data: {
-        name: item.name,
-        description: item.description,
-        price: item.price,
-        promoPrice: item.promoPrice,
-        imageUrl: item.imageUrl,
-        rating: item.rating,
-        reviewCount: item.reviewCount,
-        isAvailable: item.isAvailable,
-        isBestSeller: item.isBestSeller,
-        isRecommended: item.isRecommended,
-        categoryId,
-        variantGroups: item.variantGroups.length > 0
-          ? {
-              create: item.variantGroups.map((vg) => ({
-                name: vg.name,
-                isRequired: vg.isRequired,
-                minSelect: vg.minSelect,
-                maxSelect: vg.maxSelect,
-                options: {
-                  create: vg.options.map((opt) => ({
-                    name: opt.name,
-                    extraPrice: opt.extraPrice,
-                    isAvailable: opt.isAvailable,
-                  })),
-                },
-              })),
-            }
-          : undefined,
-      },
-    });
   }
 
   console.log(`✅ ${menuItemsData.length} Menu Items with nested variants seeded successfully.`);
