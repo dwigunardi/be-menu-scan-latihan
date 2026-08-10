@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EcdhService } from '../../common/crypto/ecdh.service';
@@ -51,7 +52,7 @@ export class AuthService {
   }
 
   /**
-   * Admin Login with email and password
+   * Staff/Admin Login with email and password
    */
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
@@ -67,7 +68,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.name);
+    const tokens = await this.generateTokens(user.id, user.email, user.name, user.role);
 
     // Hash refresh token before saving in DB for revocation tracking
     const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
@@ -80,7 +81,8 @@ export class AuthService {
       step: 'AUTH_LOGIN',
       userId: user.id,
       email: user.email,
-      msg: `Admin user ${user.email} logged in successfully`,
+      role: user.role,
+      msg: `User ${user.email} (${user.role}) logged in successfully`,
     });
 
     return {
@@ -90,6 +92,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
       },
     };
   }
@@ -114,7 +117,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.name);
+    const tokens = await this.generateTokens(user.id, user.email, user.name, user.role);
 
     const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
     await this.prisma.user.update({
@@ -125,6 +128,7 @@ export class AuthService {
     this.logger.log({
       step: 'AUTH_REFRESH',
       userId: user.id,
+      role: user.role,
       msg: `Tokens refreshed for user ${user.email}`,
     });
 
@@ -162,6 +166,7 @@ export class AuthService {
         id: true,
         email: true,
         name: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -177,8 +182,8 @@ export class AuthService {
   /**
    * Helper: Generate Access and Refresh JWT Tokens
    */
-  private async generateTokens(userId: string, email: string, name: string) {
-    const payload = { sub: userId, email, name };
+  private async generateTokens(userId: string, email: string, name: string, role: UserRole) {
+    const payload = { sub: userId, email, name, role };
 
     const accessSecret =
       this.configService.get<string>('app.JWT_ACCESS_SECRET') ||
