@@ -7,17 +7,16 @@ import {
   Body,
   Param,
   Query,
-  HttpCode,
-  HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { MenusService } from './menus.service';
 import {
   CreateMenuDto,
   UpdateMenuDto,
-  QueryMenuDto,
   ToggleMenuStatusDto,
+  QueryMenuDto,
 } from './dto/menu.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -33,55 +32,58 @@ export class MenusController {
 
   @Public()
   @Get('public/menus')
-  @ApiOperation({
-    summary: 'Public browse menu catalog with variant options and filters',
-  })
-  @ApiResponse({ status: 200, description: 'List of menu items with variants' })
-  async getPublicMenus(@Query() query: QueryMenuDto) {
+  @ApiOperation({ summary: 'Browse active catalog menu items with filters' })
+  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'isBestSeller', required: false, type: Boolean })
+  @ApiQuery({ name: 'isRecommended', required: false, type: Boolean })
+  @ApiResponse({ status: 200, description: 'List of available menu items' })
+  async findAllPublic(@Query() query: QueryMenuDto) {
     return this.menusService.findAllPublic(query);
   }
 
   @Public()
   @Get('public/menus/:id')
-  @ApiOperation({
-    summary: 'Public menu item detail with full variant modifiers',
-  })
-  @ApiResponse({ status: 200, description: 'Detail menu with variant groups' })
-  @ApiResponse({ status: 404, description: 'Menu item not found' })
-  async getPublicMenuDetail(@Param('id') id: string) {
+  @ApiOperation({ summary: 'Get detailed menu item with variants' })
+  @ApiResponse({ status: 200, description: 'Detailed menu item' })
+  @ApiResponse({ status: 404, description: 'Menu not found' })
+  async findOnePublic(@Param('id') id: string) {
     return this.menusService.findOnePublic(id);
   }
 
   // -------------------------------------------------------------
-  // Admin & Staff Endpoints
+  // Admin & Staff Operations
   // -------------------------------------------------------------
 
   @Get('admin/menus')
-  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin list all menus with pagination' })
-  @ApiResponse({ status: 200, description: 'Paginated menu list' })
-  async getAdminMenus(@Query() query: QueryMenuDto) {
+  @ApiOperation({ summary: 'Paginated menu list for admin table' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'categoryId', required: false, type: String })
+  @ApiQuery({ name: 'isAvailable', required: false, type: Boolean })
+  @ApiResponse({ status: 200, description: 'Admin paginated menu list' })
+  async findAllAdmin(@Query() query: QueryMenuDto) {
     return this.menusService.findAllAdmin(query);
   }
 
   @Post('admin/menus')
   @Roles(UserRole.ADMIN)
-  @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({
-    summary: 'Admin create menu item with optional nested variant groups',
-  })
-  @ApiResponse({ status: 201, description: 'Menu item created' })
+  @ApiOperation({ summary: 'Create new menu item with variant groups' })
+  @ApiResponse({ status: 201, description: 'Menu item created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
   async createMenu(@Body() dto: CreateMenuDto) {
     return this.menusService.create(dto);
   }
 
   @Get('admin/menus/:id')
-  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin get menu detail' })
-  @ApiResponse({ status: 200, description: 'Menu detail' })
+  @ApiOperation({ summary: 'Get menu detail for editing' })
+  @ApiResponse({ status: 200, description: 'Menu item details' })
   @ApiResponse({ status: 404, description: 'Menu not found' })
   async getAdminMenuDetail(@Param('id') id: string) {
     return this.menusService.findOnePublic(id);
@@ -90,8 +92,8 @@ export class MenusController {
   @Patch('admin/menus/:id')
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin update menu item and variants' })
-  @ApiResponse({ status: 200, description: 'Menu updated' })
+  @ApiOperation({ summary: 'Update menu item and sync variant options' })
+  @ApiResponse({ status: 200, description: 'Menu updated successfully' })
   @ApiResponse({ status: 404, description: 'Menu not found' })
   async updateMenu(
     @Param('id') id: string,
@@ -109,7 +111,7 @@ export class MenusController {
     @Param('id') id: string,
     @Body() dto: ToggleMenuStatusDto,
   ) {
-    return this.menusService.toggleStatus(id, dto);
+    return this.menusService.updateStatus(id, dto);
   }
 
   @Delete('admin/menus/:id')

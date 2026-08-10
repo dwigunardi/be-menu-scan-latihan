@@ -13,17 +13,14 @@ describe('MenusController', () => {
       findAllAdmin: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      toggleStatus: jest.fn(),
+      updateStatus: jest.fn(),
       remove: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MenusController],
       providers: [
-        {
-          provide: MenusService,
-          useValue: mockMenusService,
-        },
+        { provide: MenusService, useValue: mockMenusService },
       ],
     }).compile();
 
@@ -31,49 +28,40 @@ describe('MenusController', () => {
     menusService = module.get(MenusService);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
   it('should be defined', () => {
     expect(controller).toBeDefined();
   });
 
-  describe('getPublicMenus', () => {
-    it('should return public menus list based on query', async () => {
-      const query = { categoryId: 'cat-1', search: 'Latte' };
-      const menus = [{ id: 'm1', name: 'Caramel Latte', price: 28000 }];
+  describe('findAllPublic', () => {
+    it('should return all public menus matching query', async () => {
+      const menus = [{ id: 'm1', name: 'Latte' }];
       menusService.findAllPublic.mockResolvedValue(menus as any);
 
-      const result = await controller.getPublicMenus(query as any);
+      const result = await controller.findAllPublic({ categoryId: 'cat-1' });
       expect(result).toEqual(menus);
-      expect(menusService.findAllPublic).toHaveBeenCalledWith(query);
+      expect(menusService.findAllPublic).toHaveBeenCalledWith({ categoryId: 'cat-1' });
     });
   });
 
-  describe('getPublicMenuDetail', () => {
-    it('should return public menu detail with variants', async () => {
-      const menu = { id: 'm1', name: 'Latte', variantGroups: [] };
+  describe('findOnePublic', () => {
+    it('should return menu detail by id', async () => {
+      const menu = { id: 'm1', name: 'Latte' };
       menusService.findOnePublic.mockResolvedValue(menu as any);
 
-      const result = await controller.getPublicMenuDetail('m1');
+      const result = await controller.findOnePublic('m1');
       expect(result).toEqual(menu);
       expect(menusService.findOnePublic).toHaveBeenCalledWith('m1');
     });
   });
 
-  describe('getAdminMenus', () => {
-    it('should return paginated admin menus', async () => {
-      const query = { page: 1, limit: 10 };
-      const paginatedResult = {
-        data: [{ id: 'm1', name: 'Latte' }],
-        meta: { page: 1, limit: 10, total: 1, totalPages: 1 },
-      };
-      menusService.findAllAdmin.mockResolvedValue(paginatedResult as any);
+  describe('findAllAdmin', () => {
+    it('should return paginated admin menu list', async () => {
+      const paginated = { data: [{ id: 'm1', name: 'Latte' }], meta: { page: 1, limit: 10, total: 1, totalPages: 1 } };
+      menusService.findAllAdmin.mockResolvedValue(paginated as any);
 
-      const result = await controller.getAdminMenus(query as any);
-      expect(result).toEqual(paginatedResult);
-      expect(menusService.findAllAdmin).toHaveBeenCalledWith(query);
+      const result = await controller.findAllAdmin({ page: 1, limit: 10 });
+      expect(result).toEqual(paginated);
+      expect(menusService.findAllAdmin).toHaveBeenCalledWith({ page: 1, limit: 10 });
     });
   });
 
@@ -119,12 +107,12 @@ describe('MenusController', () => {
   describe('toggleStatus', () => {
     it('should fast toggle menu availability status', async () => {
       const dto = { isAvailable: false };
-      const updated = { id: 'm1', isAvailable: false };
-      menusService.toggleStatus.mockResolvedValue(updated as any);
+      const updated = { item: { id: 'm1', isAvailable: false }, message: 'Updated' };
+      menusService.updateStatus.mockResolvedValue(updated as any);
 
       const result = await controller.toggleStatus('m1', dto as any);
       expect(result).toEqual(updated);
-      expect(menusService.toggleStatus).toHaveBeenCalledWith('m1', dto);
+      expect(menusService.updateStatus).toHaveBeenCalledWith('m1', dto);
     });
   });
 
