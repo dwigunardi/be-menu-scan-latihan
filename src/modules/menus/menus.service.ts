@@ -3,8 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { RedisService } from '../../common/redis/redis.service';
 import {
   CreateMenuDto,
   UpdateMenuDto,
@@ -17,12 +19,23 @@ import { Prisma } from '@prisma/client';
 export class MenusService {
   private readonly logger = new Logger(MenusService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly redisService?: RedisService,
+  ) {}
 
   /**
-   * Public: Browse menu items with filters and full variant structures
+   * Public: Browse menu items with filters and full variant structures (Redis Cached)
    */
   async findAllPublic(query: QueryMenuDto) {
+    const cacheKey = `menuscan:cache:menus:query:${JSON.stringify(query)}`;
+    if (this.redisService) {
+      const cached = await this.redisService.get<any[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const where: Prisma.MenuItemWhereInput = {
       deletedAt: null,
       isAvailable: query.isAvailable !== undefined ? query.isAvailable : true,
@@ -47,7 +60,7 @@ export class MenusService {
       where.isRecommended = query.isRecommended;
     }
 
-    return this.prisma.menuItem.findMany({
+    const items = await this.prisma.menuItem.findMany({
       where,
       orderBy: [
         { isBestSeller: 'desc' },
@@ -68,24 +81,34 @@ export class MenusService {
         },
       },
     });
+
+    if (this.redisService) {
+      await this.redisService.set(cacheKey, items, 300); // 5 mins TTL
+    }
+
+    return items;
   }
 
   /**
-   * Public: Detail menu item with all variant options
+   * Public: Detail menu item with all variant options (Redis Cached)
    */
   async findOnePublic(id: string) {
-    const menuItem = await this.prisma.menuItem.findFirst({
-      where: {
-        id,
-        deletedAt: null,
-      },
+    const cacheKey = `menuscan:cache:menus:item:${id}`;
+    if (this.redisService) {
+      const cached = await this.redisService.get<any>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    const item = await this.prisma.menuItem.findFirst({
+      where: { id, deletedAt: null },
       include: {
-        category: {
-          select: { id: true, name: true, slug: true },
-        },
+        category: true,
         variantGroups: {
           include: {
             options: {
+              where: { isAvailable: true },
               orderBy: { extraPrice: 'asc' },
             },
           },
@@ -93,19 +116,23 @@ export class MenusService {
       },
     });
 
-    if (!menuItem) {
+    if (!item) {
       throw new NotFoundException(`Menu item with ID ${id} not found`);
     }
 
-    return menuItem;
+    if (this.redisService) {
+      await this.redisService.set(cacheKey, item, 300);
+    }
+
+    return item;
   }
 
   /**
-   * Admin: List menu items with pagination and filters
+   * Admin: List all menu items with pagination and filters
    */
-  async findAllAdmin(query: QueryMenuDto) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+  async findAllAdmin(query: QueryMenuDto & { page?: number; limit?: number }) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? query.limit : 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.MenuItemWhereInput = {
@@ -135,9 +162,7 @@ export class MenusService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          category: {
-            select: { id: true, name: true, slug: true },
-          },
+          category: true,
           variantGroups: {
             include: {
               options: true,
@@ -150,12 +175,35 @@ export class MenusService {
     return {
       data,
       meta: {
-        total,
         page,
         limit,
+        total,
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Admin: Find one menu item detail
+   */
+  async findOneAdmin(id: string) {
+    const item = await this.prisma.menuItem.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        category: true,
+        variantGroups: {
+          include: {
+            options: true,
+          },
+        },
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException(`Menu item with ID ${id} not found`);
+    }
+
+    return item;
   }
 
   /**
@@ -167,37 +215,37 @@ export class MenusService {
     });
 
     if (!category) {
-      throw new BadRequestException('Category not found or deleted');
+      throw new BadRequestException(
+        `Category with ID ${dto.categoryId} does not exist`,
+      );
     }
 
-    const menuItem = await this.prisma.menuItem.create({
+    const item = await this.prisma.menuItem.create({
       data: {
         name: dto.name,
         description: dto.description,
         price: dto.price,
         promoPrice: dto.promoPrice,
-        categoryId: dto.categoryId,
         imageUrl: dto.imageUrl,
+        isAvailable: dto.isAvailable ?? true,
         isBestSeller: dto.isBestSeller ?? false,
         isRecommended: dto.isRecommended ?? false,
-        isAvailable: dto.isAvailable ?? true,
-        variantGroups: dto.variantGroups?.length
-          ? {
-              create: dto.variantGroups.map((group) => ({
-                name: group.name,
-                isRequired: group.isRequired ?? false,
-                minSelect: group.minSelect ?? 0,
-                maxSelect: group.maxSelect ?? 1,
-                options: {
-                  create: group.options.map((opt) => ({
-                    name: opt.name,
-                    extraPrice: opt.extraPrice ?? 0,
-                    isAvailable: opt.isAvailable ?? true,
-                  })),
-                },
+        categoryId: dto.categoryId,
+        variantGroups: {
+          create: dto.variantGroups?.map((group) => ({
+            name: group.name,
+            isRequired: group.isRequired ?? false,
+            minSelect: group.minSelect ?? 0,
+            maxSelect: group.maxSelect ?? 1,
+            options: {
+              create: group.options.map((option) => ({
+                name: option.name,
+                extraPrice: option.extraPrice ?? 0,
+                isAvailable: option.isAvailable ?? true,
               })),
-            }
-          : undefined,
+            },
+          })),
+        },
       },
       include: {
         category: true,
@@ -209,144 +257,149 @@ export class MenusService {
       },
     });
 
+    this.invalidateCache();
+
     this.logger.log({
       step: 'MENU_CREATE',
-      menuId: menuItem.id,
-      name: menuItem.name,
-      msg: `Menu item ${menuItem.name} created`,
+      menuId: item.id,
+      name: item.name,
+      msg: `Menu ${item.name} created`,
     });
 
-    return menuItem;
+    return item;
   }
 
   /**
-   * Admin: Update menu item
+   * Admin: Update menu item and replace variant groups atomically
    */
   async update(id: string, dto: UpdateMenuDto) {
-    const existing = await this.prisma.menuItem.findFirst({
-      where: { id, deletedAt: null },
-    });
-
-    if (!existing) {
-      throw new NotFoundException(`Menu item with ID ${id} not found`);
-    }
+    await this.findOneAdmin(id);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findFirst({
         where: { id: dto.categoryId, deletedAt: null },
       });
       if (!category) {
-        throw new BadRequestException('Category not found');
+        throw new BadRequestException(
+          `Category with ID ${dto.categoryId} does not exist`,
+        );
       }
     }
 
-    // If variantGroups are provided, recreate them in a transaction
-    if (dto.variantGroups) {
-      await this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (dto.variantGroups) {
         await tx.menuItemVariantGroup.deleteMany({
           where: { menuItemId: id },
         });
 
-        if (dto.variantGroups && dto.variantGroups.length > 0) {
-          for (const group of dto.variantGroups) {
-            await tx.menuItemVariantGroup.create({
-              data: {
-                menuItemId: id,
-                name: group.name,
-                isRequired: group.isRequired ?? false,
-                minSelect: group.minSelect ?? 0,
-                maxSelect: group.maxSelect ?? 1,
-                options: {
-                  create: group.options.map((opt) => ({
-                    name: opt.name,
-                    extraPrice: opt.extraPrice ?? 0,
-                    isAvailable: opt.isAvailable ?? true,
-                  })),
-                },
+        for (const group of dto.variantGroups) {
+          await tx.menuItemVariantGroup.create({
+            data: {
+              menuItemId: id,
+              name: group.name,
+              isRequired: group.isRequired ?? false,
+              minSelect: group.minSelect ?? 0,
+              maxSelect: group.maxSelect ?? 1,
+              options: {
+                create: group.options.map((option) => ({
+                  name: option.name,
+                  extraPrice: option.extraPrice ?? 0,
+                  isAvailable: option.isAvailable ?? true,
+                })),
               },
-            });
-          }
+            },
+          });
         }
-      });
-    }
+      }
 
-    const { variantGroups, ...updateFields } = dto;
-
-    const updated = await this.prisma.menuItem.update({
-      where: { id },
-      data: updateFields,
-      include: {
-        category: true,
-        variantGroups: {
-          include: {
-            options: true,
+      return tx.menuItem.update({
+        where: { id },
+        data: {
+          ...(dto.name && { name: dto.name }),
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.price !== undefined && { price: dto.price }),
+          ...(dto.promoPrice !== undefined && { promoPrice: dto.promoPrice }),
+          ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
+          ...(dto.isAvailable !== undefined && { isAvailable: dto.isAvailable }),
+          ...(dto.isBestSeller !== undefined && { isBestSeller: dto.isBestSeller }),
+          ...(dto.isRecommended !== undefined && { isRecommended: dto.isRecommended }),
+          ...(dto.categoryId && { categoryId: dto.categoryId }),
+        },
+        include: {
+          category: true,
+          variantGroups: {
+            include: {
+              options: true,
+            },
           },
         },
-      },
+      });
     });
+
+    this.invalidateCache();
 
     this.logger.log({
       step: 'MENU_UPDATE',
       menuId: id,
-      msg: `Menu item ${id} updated`,
+      msg: `Menu ${id} updated`,
     });
 
     return updated;
   }
 
   /**
-   * Admin: Fast toggle isAvailable status
+   * Admin / Kitchen / Cashier: Fast Toggle availability status (1-Click Out-of-Stock)
    */
-  async toggleStatus(id: string, dto: ToggleMenuStatusDto) {
-    const existing = await this.prisma.menuItem.findFirst({
-      where: { id, deletedAt: null },
-    });
-
-    if (!existing) {
-      throw new NotFoundException(`Menu item with ID ${id} not found`);
-    }
+  async updateStatus(id: string, dto: ToggleMenuStatusDto) {
+    await this.findOneAdmin(id);
 
     const updated = await this.prisma.menuItem.update({
       where: { id },
       data: { isAvailable: dto.isAvailable },
     });
 
+    this.invalidateCache();
+
     this.logger.log({
-      step: 'MENU_TOGGLE_STATUS',
+      step: 'MENU_STATUS_TOGGLE',
       menuId: id,
       isAvailable: dto.isAvailable,
-      msg: `Menu item ${id} status set to ${dto.isAvailable}`,
+      msg: `Menu ${id} availability changed to ${dto.isAvailable}`,
     });
 
-    return updated;
+    return {
+      success: true,
+      message: `Menu availability updated to ${dto.isAvailable ? 'AVAILABLE' : 'OUT_OF_STOCK'}`,
+      item: updated,
+    };
   }
 
   /**
    * Admin: Soft delete menu item
    */
   async remove(id: string) {
-    const existing = await this.prisma.menuItem.findFirst({
-      where: { id, deletedAt: null },
-    });
-
-    if (!existing) {
-      throw new NotFoundException(`Menu item with ID ${id} not found`);
-    }
+    await this.findOneAdmin(id);
 
     await this.prisma.menuItem.update({
       where: { id },
       data: { deletedAt: new Date() },
     });
 
+    this.invalidateCache();
+
     this.logger.log({
       step: 'MENU_DELETE',
       menuId: id,
-      msg: `Menu item ${id} soft-deleted`,
+      msg: `Menu ${id} soft deleted`,
     });
 
-    return {
-      success: true,
-      message: `Menu item ${id} deleted successfully`,
-    };
+    return { success: true, message: `Menu item ${id} deleted successfully` };
+  }
+
+  private invalidateCache() {
+    if (this.redisService) {
+      this.redisService.delByPattern('menuscan:cache:menus:*');
+      this.redisService.del('menuscan:cache:categories:public');
+    }
   }
 }
