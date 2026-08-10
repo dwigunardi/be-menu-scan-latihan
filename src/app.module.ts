@@ -5,6 +5,7 @@ import appConfig from './config/app.config';
 import { AppLoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { CryptoModule } from './common/crypto/crypto.module';
+import { RedisModule } from './common/redis/redis.module';
 import { DecryptPayloadMiddleware } from './common/middlewares/decrypt-payload.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -17,6 +18,8 @@ import { MenusModule } from './modules/menus/menus.module';
 import { TablesModule } from './modules/tables/tables.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { EventsModule } from './modules/events/events.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -30,6 +33,8 @@ import { AppService } from './app.service';
     AppLoggerModule,
     PrismaModule,
     CryptoModule,
+    RedisModule,
+    EventsModule,
     AuthModule,
     CategoriesModule,
     BannersModule,
@@ -37,6 +42,7 @@ import { AppService } from './app.service';
     TablesModule,
     OrdersModule,
     ReportsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [
