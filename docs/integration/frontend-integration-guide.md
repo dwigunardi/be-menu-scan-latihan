@@ -4,6 +4,7 @@
 > **Backend Architecture**: NestJS 11 + PostgreSQL + Prisma ORM + Redis Cache + WebSockets (Socket.IO) + Multi-Role RBAC  
 > **Ordering Model**: **Pre-Paid (Bayar di Awal / Pay-at-Order) + Persistent Multi-Batch Session**  
 > **Architecture Pattern**: **Either / Result Pattern (Railway-Oriented) + Double-Sided Zod Contract Hardening**  
+> **Security Protocol**: **ECDH P-256 Handshake + AES-256-GCM + Pre-Shared Hardcoded Salt (`APP_SECRET`)**  
 > **API Base URL**: `http://localhost:5000/api/v1`  
 > **WebSocket Gateway URL**: `ws://localhost:5000/events` (Socket.IO)  
 > **Interactive Swagger OpenAPI**: `http://localhost:5000/api/docs`  
@@ -21,24 +22,28 @@
    - [C. Template Single Gateway Client (`lib/api-client.ts`)](#c-template-single-gateway-client-libapi-clientts)
    - [D. Template Skema Kontrak Zod (`schemas/menu.schema.ts`, `order.schema.ts`)](#d-template-skema-kontrak-zod-schemasmenuschemats-orderschemats)
    - [E. Contoh Pemakaian di Komponen UI / Hook React / Next.js](#e-contoh-pemakaian-di-komponen-ui--hook-react--nextjs)
-4. [Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)](#4-alur-bisnis--user-journey-terpadu-pre-paid-flow)
+4. [Arsitektur Payload Encryption, ECDH Handshake & Hardcoded Secret (`APP_SECRET`)](#4-arsitektur-payload-encryption-ecdh-handshake--hardcoded-secret-app_secret)
+   - [A. Konsep Peran Hardcoded Pre-Shared Salt (`APP_SECRET`)](#a-konsep-peran-hardcoded-pre-shared-salt-app_secret)
+   - [B. Alur 4 Langkah Handshake Kriptografi](#b-alur-4-langkah-handshake-kriptografi)
+   - [C. Template Kode Lengkap Kriptografi Frontend (`lib/crypto/ecdh.ts`)](#c-template-kode-lengkap-kriptografi-frontend-libcryptoecdhts)
+5. [Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)](#5-alur-bisnis--user-journey-terpadu-pre-paid-flow)
    - [A. Customer Journey (Scan Meja $\rightarrow$ Pre-Paid $\rightarrow$ Rating $\rightarrow$ Tambah Pesanan)](#a-customer-journey-scan-meja--pre-paid--rating--tambah-pesanan)
    - [B. Kitchen KDS Journey (Hanya Masak Pesanan yang Sudah LUNAS / PAID)](#b-kitchen-kds-journey-hanya-masak-pesanan-yang-sudah-lunas--paid)
    - [C. Cashier POS Journey (Konfirmasi Bayar Cash / EDC)](#c-cashier-pos-journey-konfirmasi-bayar-cash--edc)
    - [D. Waiter Mobile Journey (Pengantaran Makanan & 1-Tap Reset Meja)](#d-waiter-mobile-journey-pengantaran-makanan--1-tap-reset-meja)
-5. [Integrasi Real-Time WebSockets (Socket.IO)](#5-integrasi-real-time-websockets-socketio)
+6. [Integrasi Real-Time WebSockets (Socket.IO)](#6-integrasi-real-time-websockets-socketio)
    - [A. Cara Connect ke WebSocket Gateway](#a-cara-connect-ke-websocket-gateway)
    - [B. Room Subscriptions & Event Catalog](#b-room-subscriptions--event-catalog)
-6. [Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)](#6-pemetaan-layar-frontend-screen-by-screen-ui-blueprints)
+7. [Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)](#7-pemetaan-layar-frontend-screen-by-screen-ui-blueprints)
    - [A. Customer Mobile Web App (Screens 1 – 6)](#a-customer-mobile-web-app-screens-1--6)
    - [B. Proper Admin & Staff Dashboard Suite (Screens A – E)](#b-proper-admin--staff-dashboard-suite-screens-a--e)
-7. [Spesifikasi Teknis Integrasi API & Backend Hardening](#7-spesifikasi-teknis-integrasi-api--backend-hardening)
+8. [Spesifikasi Teknis Integrasi API & Backend Hardening](#8-spesifikasi-teknis-integrasi-api--backend-hardening)
    - [A. Standard Envelope Response Format](#a-standard-envelope-response-format)
    - [B. Sesi Meja Persisten & Struktur Active Orders](#b-sesi-meja-persisten--struktur-active-orders)
    - [C. Logika Perhitungan Harga Varian di Frontend (Cart Formula)](#c-logika-perhitungan-harga-varian-di-frontend-cart-formula)
    - [D. State Machine Siklus Hidup Pesanan & Meja](#d-state-machine-siklus-hidup-pesanan--meja)
    - [E. Backend Response Hardening dengan `@ZodResponse`](#e-backend-response-hardening-dengan-zodresponse)
-8. [Katalog Endpoint & Contoh Payload Lengkap](#8-katalog-endpoint--contoh-payload-lengkap)
+9. [Katalog Endpoint & Contoh Payload Lengkap](#9-katalog-endpoint--contoh-payload-lengkap)
    - [1. Default Credentials untuk Testing 4 Role Staff](#1-default-credentials-untuk-testing-4-role-staff)
    - [2. Modul Public (Customer, QRIS & Tracking)](#2-modul-public-customer-qris--tracking)
    - [3. Modul Auth & Staff Profile](#3-modul-auth--staff-profile)
@@ -174,11 +179,14 @@ export async function requestApi<TReq, TRes>(
 
     // 2. HTTP FETCH (Dengan Token & Header Otomatis)
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const handshakeToken = typeof window !== 'undefined' ? localStorage.getItem('handshake_token') : null;
+
     const response = await fetch(`http://localhost:5000/api/v1${config.url}`, {
       method: config.method || 'GET',
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(handshakeToken ? { 'x-handshake-token': handshakeToken } : {}),
         ...config.headers,
       },
       body: validatedBody ? JSON.stringify(validatedBody) : undefined,
@@ -332,7 +340,167 @@ export function MenuList() {
 
 ---
 
-## 4. Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)
+## 4. Arsitektur Payload Encryption, ECDH Handshake & Hardcoded Secret (`APP_SECRET`)
+
+Sistem keamanan MenuScan menggunakan **Hybrid Cryptography Protocol**:
+- **Key Exchange**: Elliptic-Curve Diffie-Hellman (**ECDH Curve NIST P-256 / `prime256v1`**).
+- **Key Derivation**: **HKDF (HMAC-SHA256)** dengan **`APP_SECRET`** sebagai *Pre-Shared Cryptographic Salt*.
+- **Payload Cipher**: **AES-256-GCM** (Authenticated Encryption dengan IV 12 bytes & Auth Tag 16 bytes).
+
+---
+
+### A. Konsep Peran Hardcoded Pre-Shared Salt (`APP_SECRET`)
+
+Benar sekali! Antara Backend dan Frontend memiliki 1 string rahasia bersama (*pre-shared secret*) yang ditaruh di `.env`:
+
+- **Di Backend `.env`**:
+  ```env
+  APP_SECRET="menuscan_app_handshake_secret_32bytes_key_secure_xyz"
+  ```
+- **Di Frontend `.env` (Next.js / Vite / React)**:
+  ```env
+  NEXT_PUBLIC_APP_SECRET="menuscan_app_handshake_secret_32bytes_key_secure_xyz"
+  ```
+
+#### 🔐 **Mengapa Membutuhkan `APP_SECRET` + ECDH?**
+1. **Pencegahan Man-in-the-Middle (MitM)**: Jika pihak ketiga menyadap public key ECDH, mereka tetap tidak bisa menurunkan *Session Key* karena tidak memiliki `APP_SECRET`.
+2. **Kunci Sesi Unik per Device**: Walaupun `APP_SECRET` sama, kunci enkripsi tiap device berbeda karena diturunkan dari kombinasi:
+   $$\text{SessionKey} = \text{HKDF}(\text{IKM}=\text{SharedSecret},\; \text{Salt}=\text{APP\_SECRET},\; \text{Info}=\text{"menuscan-session-"}+\text{nonce},\; 32)$$
+
+---
+
+### B. Alur 4 Langkah Handshake Kriptografi
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor FE as 🌐 Frontend Client
+    participant BE as ⚙️ Backend API (/auth/handshake)
+
+    Note over FE: 1. Generate Keypair ECDH (P-256) & Nonce 16 bytes
+    FE->>BE: POST /api/v1/auth/handshake { clientPublicKey, nonce }
+    Note over BE: 2. Backend hitung SharedSecret + HKDF(APP_SECRET) -> SessionKey
+    BE-->>FE: Return { serverPublicKey, handshakeToken, expiresIn: 7200 }
+    Note over FE: 3. Frontend hitung SharedSecret(serverPublicKey) + HKDF(APP_SECRET) -> SessionKey yang sama!
+    Note over FE,BE: 4. Setiap request membawa Header "x-handshake-token" & Payload AES-256-GCM
+```
+
+---
+
+### C. Template Kode Lengkap Kriptografi Frontend (`lib/crypto/ecdh.ts`)
+
+Berikut adalah modul siap pakai di Frontend (mendukung Node.js / Browser Web Crypto):
+
+```typescript
+// lib/crypto/ecdh.ts
+import { createECDH, randomBytes, createCipheriv, createDecipheriv, hkdfSync } from 'node:crypto';
+
+const APP_SECRET = process.env.NEXT_PUBLIC_APP_SECRET || 'menuscan_app_handshake_secret_32bytes_key_secure_xyz';
+
+export interface EncryptedPayload {
+  encrypted: true;
+  iv: string;      // Base64
+  tag: string;     // Base64
+  payload: string; // Base64 Ciphertext
+}
+
+export class FrontendCrypto {
+  private ecdh = createECDH('prime256v1');
+  private sessionKey: Buffer | null = null;
+  private handshakeToken: string | null = null;
+
+  constructor() {
+    this.ecdh.generateKeys();
+  }
+
+  /**
+   * Ambil Public Key Client (Hex 130 chars)
+   */
+  getClientPublicKeyHex(): string {
+    return this.ecdh.getPublicKey('hex');
+  }
+
+  /**
+   * Lakukan Handshake dengan Backend
+   */
+  async performHandshake(apiUrl = 'http://localhost:5000/api/v1'): Promise<string> {
+    const nonce = randomBytes(16).toString('hex');
+    const clientPublicKey = this.getClientPublicKeyHex();
+
+    const res = await fetch(`${apiUrl}/auth/handshake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientPublicKey, nonce }),
+    });
+
+    const json = await res.json();
+    if (!json.success) throw new Error('Handshake failed: ' + json.message);
+
+    const { serverPublicKey, handshakeToken } = json.data;
+
+    // 1. Hitung ECDH Shared Secret
+    const sharedSecret = this.ecdh.computeSecret(serverPublicKey, 'hex');
+
+    // 2. Turunkan 32-byte Session Key menggunakan HKDF + APP_SECRET
+    const salt = Buffer.from(APP_SECRET, 'utf-8');
+    const info = Buffer.from(`menuscan-session-${nonce}`, 'utf-8');
+    const derivedKey = hkdfSync('sha256', sharedSecret, salt, info, 32);
+
+    this.sessionKey = Buffer.from(derivedKey);
+    this.handshakeToken = handshakeToken;
+
+    // Simpan ke storage jika perlu
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('handshake_token', handshakeToken);
+    }
+
+    return handshakeToken;
+  }
+
+  /**
+   * Enkripsi Objek JSON ke format AES-256-GCM Envelope
+   */
+  encrypt(data: unknown): EncryptedPayload {
+    if (!this.sessionKey) throw new Error('Session key not initialized. Call performHandshake() first.');
+
+    const iv = randomBytes(12); // 96-bit IV
+    const cipher = createCipheriv('aes-256-gcm', this.sessionKey, iv);
+
+    const jsonString = JSON.stringify(data);
+    let ciphertext = cipher.update(jsonString, 'utf8', 'base64');
+    ciphertext += cipher.final('base64');
+    const tag = cipher.getAuthTag();
+
+    return {
+      encrypted: true,
+      iv: iv.toString('base64'),
+      tag: tag.toString('base64'),
+      payload: ciphertext,
+    };
+  }
+
+  /**
+   * Dekripsi AES-256-GCM Envelope kembali ke Objek Asli
+   */
+  decrypt<T>(envelope: { iv: string; tag: string; payload: string }): T {
+    if (!this.sessionKey) throw new Error('Session key not initialized.');
+
+    const iv = Buffer.from(envelope.iv, 'base64');
+    const tag = Buffer.from(envelope.tag, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', this.sessionKey, iv);
+    decipher.setAuthTag(tag);
+
+    let decrypted = decipher.update(envelope.payload, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+
+    return JSON.parse(decrypted) as T;
+  }
+}
+```
+
+---
+
+## 5. Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)
 
 ### A. Customer Journey (Scan Meja $\rightarrow$ Pre-Paid $\rightarrow$ Rating $\rightarrow$ Tambah Pesanan)
 
@@ -371,7 +539,7 @@ sequenceDiagram
 
 ---
 
-## 5. Integrasi Real-Time WebSockets (Socket.IO)
+## 6. Integrasi Real-Time WebSockets (Socket.IO)
 
 ### A. Cara Connect ke WebSocket Gateway
 
@@ -438,7 +606,7 @@ socket.on('order:status_changed', (payload) => {
 
 ---
 
-## 6. Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)
+## 7. Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)
 
 ### A. Customer Mobile Web App (Screens 1 – 6)
 
@@ -498,7 +666,7 @@ socket.on('order:status_changed', (payload) => {
 
 ---
 
-## 7. Spesifikasi Teknis Integrasi API & Backend Hardening
+## 8. Spesifikasi Teknis Integrasi API & Backend Hardening
 
 ### A. Standard Envelope Response Format
 
@@ -608,7 +776,7 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 
 ---
 
-## 8. Katalog Endpoint & Contoh Payload Lengkap
+## 9. Katalog Endpoint & Contoh Payload Lengkap
 
 ### 1. Default Credentials untuk Testing 4 Role Staff
 
