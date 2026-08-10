@@ -1,10 +1,22 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import appConfig from './config/app.config';
 import { AppLoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { DecryptPayloadMiddleware } from './common/middlewares/decrypt-payload.middleware';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+
+// Domain Feature Modules
+import { AuthModule } from './modules/auth/auth.module';
+import { CategoriesModule } from './modules/categories/categories.module';
+import { BannersModule } from './modules/banners/banners.module';
+import { MenusModule } from './modules/menus/menus.module';
+import { TablesModule } from './modules/tables/tables.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { ReportsModule } from './modules/reports/reports.module';
+
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -17,9 +29,22 @@ import { AppService } from './app.service';
     AppLoggerModule,
     PrismaModule,
     CryptoModule,
+    AuthModule,
+    CategoriesModule,
+    BannersModule,
+    MenusModule,
+    TablesModule,
+    OrdersModule,
+    ReportsModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

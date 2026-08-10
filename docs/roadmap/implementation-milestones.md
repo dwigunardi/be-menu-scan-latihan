@@ -14,8 +14,8 @@
 | **Phase 0** | Planning, Architecture & Database Setup | ✅ **DONE** | 100% |
 | **Phase 1** | Core Foundation & Infrastructure Modules | ✅ **DONE** | 100% |
 | **Phase 2** | Global Security, Validation & Swagger | ✅ **DONE** | 100% |
-| **Phase 3** | Feature Domain Modules (Business Logic) | ⏳ **IN PROGRESS** | 0% |
-| **Phase 4** | Seeding, Verification & Finalization | ⬜ **PENDING** | 0% |
+| **Phase 3** | Feature Domain Modules (Business Logic) | ✅ **DONE** | 100% |
+| **Phase 4** | Seeding, Verification & Finalization | ⏳ **IN PROGRESS** | 0% |
 
 ---
 
@@ -81,38 +81,39 @@
 
 ---
 
-## 🧩 Phase 3: Feature Domain Modules (Business Logic)
+## ✅ Phase 3: Feature Domain Modules (Business Logic) (COMPLETED)
 
-- [ ] **3.1. Auth Module** (`src/modules/auth/`)
+- [x] **3.1. Auth Module** (`src/modules/auth/`)
   - Endpoint `/api/v1/auth/handshake` (ECDH Key Exchange).
   - Endpoint `/api/v1/auth/login` (Admin Login + Hash Refresh Token).
   - Endpoint `/api/v1/auth/refresh` (Access Token Renewal).
   - Endpoint `/api/v1/auth/logout` (Revoke Refresh Token).
-  - Passport JWT Strategies (`JwtStrategy`, `JwtRefreshStrategy`) & Guards.
-- [ ] **3.2. Banners Module** (`src/modules/banners/`)
+  - Endpoint `/api/v1/auth/me` (Profile Check).
+  - Passport JWT Strategies (`JwtStrategy`, `JwtRefreshStrategy`) & Global `JwtAuthGuard`.
+- [x] **3.2. Banners Module** (`src/modules/banners/`)
   - Public `GET /api/v1/public/banners` (Return promo banners aktif).
-  - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/banners`.
-- [ ] **3.3. Categories Module** (`src/modules/categories/`)
-  - Public `GET /api/v1/public/categories` (Return list kategori + item count).
-  - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/categories`.
-  - Admin Reordering Kategori (`sortOrder`).
-- [ ] **3.4. Menus & Variants Module** (`src/modules/menus/`)
-  - Public `GET /api/v1/public/menus` (Filter by category, search, isBestSeller, isRecommended).
-  - Public `GET /api/v1/public/menus/:id` (Detail menu + variantGroups & options).
-  - Admin CRUD `GET`, `POST`, `PATCH`, `DELETE` `/api/v1/admin/menus`.
+  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/banners`.
+- [x] **3.3. Categories Module** (`src/modules/categories/`)
+  - Public `GET /api/v1/public/categories` (Return list kategori + active item count).
+  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/categories`.
+  - Admin Reordering Kategori (`PATCH /api/v1/admin/categories/reorder`).
+- [x] **3.4. Menus & Variants Module** (`src/modules/menus/`)
+  - Public `GET /api/v1/public/menus` (Filter category, search, availability, best seller, recommended).
+  - Public `GET /api/v1/public/menus/:id` (Detail menu + nested variantGroups & options).
+  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/menus`.
   - Admin Fast Toggle `PATCH /api/v1/admin/menus/:id/status` (`isAvailable`).
-- [ ] **3.5. Tables Module** (`src/modules/tables/`)
+- [x] **3.5. Tables Module** (`src/modules/tables/`)
   - Public `GET /api/v1/public/tables/:number/status` (Cek status meja & activeCustomerName).
   - Public `POST /api/v1/public/tables/:number/session` (Inisialisasi sesi meja & nama pemesan).
-  - Admin `GET /api/v1/admin/tables` & `POST /api/v1/admin/tables/:id/reset`.
-- [ ] **3.6. Orders Module** (`src/modules/orders/`)
-  - Public `POST /api/v1/public/orders` (Buat pesanan baru dengan pilihan variasi/extra).
+  - Admin `GET /api/v1/admin/tables`, `POST /api/v1/admin/tables`, `POST /api/v1/admin/tables/:id/reset`, `DELETE /api/v1/admin/tables/:id`.
+- [x] **3.6. Orders Module** (`src/modules/orders/`)
+  - Public `POST /api/v1/public/orders` (Buat pesanan baru dengan snapshot harga & variasi dalam atomic transaction).
   - Public `GET /api/v1/public/orders/:orderNumber` (Status pesanan meja).
   - Admin `GET /api/v1/admin/orders` (Live Orders Monitor Dapur/Kasir).
-  - Admin `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan).
-- [ ] **3.7. Reports Module** (`src/modules/reports/`)
-  - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan & Omset).
-  - Admin `GET /api/v1/admin/reports/top-selling` (Top Menu Paling Laris).
+  - Admin `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan & paidAt timestamp).
+- [x] **3.7. Reports Module** (`src/modules/reports/`)
+  - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan, Total Order, Average Order Value).
+  - Admin `GET /api/v1/admin/reports/top-selling` (Top Menu Paling Laris berdasarkan kuantitas & omset).
 
 ---
 
