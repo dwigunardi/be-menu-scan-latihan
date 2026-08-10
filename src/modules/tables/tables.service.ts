@@ -3,8 +3,10 @@ import {
   NotFoundException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { EventsGateway } from '../events/events.gateway';
 import { CreateTableDto, TableSessionDto } from './dto/table.dto';
 
 export const TableStatus = {
@@ -19,7 +21,10 @@ export type TableStatus = (typeof TableStatus)[keyof typeof TableStatus];
 export class TablesService {
   private readonly logger = new Logger(TablesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly eventsGateway?: EventsGateway,
+  ) {}
 
   /**
    * Public: Check table status, active customer, and persistent order history
@@ -96,6 +101,10 @@ export class TablesService {
       },
     });
 
+    if (this.eventsGateway) {
+      this.eventsGateway.emitTableStatusChanged(updated);
+    }
+
     this.logger.log({
       step: 'TABLE_SESSION_INIT',
       tableNumber,
@@ -148,6 +157,10 @@ export class TablesService {
       },
     });
 
+    if (this.eventsGateway) {
+      this.eventsGateway.emitTableStatusChanged(table);
+    }
+
     this.logger.log({
       step: 'TABLE_CREATE',
       tableId: table.id,
@@ -177,6 +190,10 @@ export class TablesService {
         activeCustomerName: null,
       },
     });
+
+    if (this.eventsGateway) {
+      this.eventsGateway.emitTableStatusChanged(updated);
+    }
 
     this.logger.log({
       step: 'TABLE_RESET',
