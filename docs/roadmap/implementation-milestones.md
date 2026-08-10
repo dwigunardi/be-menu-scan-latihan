@@ -1,7 +1,7 @@
 # Implementation Milestones & Project Roadmap
 
 > **Project**: MenuScan – Digital QR Code Menu System  
-> **Backend Framework**: NestJS (TypeScript) + PostgreSQL + Prisma ORM + Multi-Role RBAC  
+> **Backend Framework**: NestJS 11 (TypeScript) + PostgreSQL + Prisma ORM 7 + Multi-Role RBAC + Redis Cache + WebSockets (Socket.IO)  
 > **Document Location**: `docs/roadmap/implementation-milestones.md`  
 > **Status**: Active Project Tracking Document  
 
@@ -16,7 +16,7 @@
 | **Phase 2** | Global Security, Validation & Swagger | ✅ **DONE** | 100% |
 | **Phase 3** | Feature Domain Modules (Business Logic) | ✅ **DONE** | 100% |
 | **Phase 4** | Seeding, Multi-Role RBAC, Pre-Paid Flow & E2E Verification | ✅ **DONE** | 100% |
-| **Phase 5** | Real-Time WebSockets, Redis Caching & Payment Gateway | ⏳ **PLANNED** | 0% |
+| **Phase 5** | Real-Time WebSockets, Redis Caching & Payment Gateway Engine | ✅ **DONE (5.1–5.3)** | 100% |
 
 ---
 
@@ -137,20 +137,20 @@
 
 ---
 
-## ⏳ Phase 5: Real-Time WebSockets, Redis Caching & Payment Gateway (PLANNED)
+## ✅ Phase 5: Real-Time WebSockets, Redis Caching & Payment Gateway (COMPLETED)
 
-- [ ] **5.1. Real-Time WebSocket Gateway (`@nestjs/websockets` + Socket.IO)**
-  - Implementasi WebSocket Gateway dengan Room-based dispatching:
-    - `room:kitchen`: Push live order baru saat status `PAID` (Instan audio ping & live card inject di KDS).
-    - `room:waiter`: Push notifikasi makanan siap saji (`SERVED`) & meja kotor butuh dibersihkan.
-    - `room:table:<number>`: Push status pesanan ke smartphone pelanggan secara *real-time* (0ms delay, tanpa polling).
-- [ ] **5.2. Redis Caching, Pub/Sub & Distributed Session**
-  - Cache layer untuk katalog menu & kategori (`GET /public/menus`) dengan auto-invalidation saat Admin update data.
-  - Pindahkan penyimpanan session handshake ECDH dari in-memory ke Redis Store.
-  - Redis Pub/Sub Adapter untuk menghubungkan WebSockets antar instance server.
-  - Rate Limiter terdistribusi (`@nestjs/throttler` + Redis).
-- [ ] **5.3. Payment Gateway Webhook Integration**
-  - Integrasi QRIS Dinamis (Midtrans / Xendit / Tripay).
-  - Endpoint Webhook `POST /api/v1/public/payments/webhook` dengan signature validation untuk otomatis mengubah order menjadi `PAID`.
-- [ ] **5.4. Cloud Media Storage Upload**
-  - Endpoint `POST /api/v1/admin/media/upload` (Multer + S3 / Cloudinary / Supabase Storage) untuk upload banner promo & foto menu dari dashboard CMS.
+- [x] **5.1. Real-Time WebSocket Gateway (`@nestjs/websockets` + Socket.IO)**
+  - Implementasi WebSocket Gateway di namespace `/events`:
+    - `room:kitchen`: Live push notifikasi pesanan baru saat `PAID` (Audio bell + instant dispatch ke KDS).
+    - `room:waiter`: Live push alert pengantaran makanan (`SERVED`) & meja butuh dibersihkan.
+    - `room:table:<number>`: Live tracking status pesanan di smartphone pelanggan (0ms delay, tanpa polling).
+- [x] **5.2. Redis Caching & Distributed Session (`ioredis`)**
+  - `RedisService` (`@Global()`) dengan error resilience dan graceful fallback.
+  - Caching katalog menu & kategori (`menuscan:cache:menus:*`, `menuscan:cache:categories`) dengan TTL 5 menit & auto-invalidation saat Admin edit/hapus/toggle status menu.
+  - Penyimpanan sesi handshake ECDH terdistribusi di Redis (`menuscan:ecdh:*`).
+  - Monitoring visual real-time siap dipantau lewat **Redis Insight**.
+- [x] **5.3. Payment Gateway Webhook & QRIS Engine**
+  - Generator Dynamic QRIS `POST /api/v1/public/payments/create-qris` (EMVCo-like standard string, transaction ID, 15m expiry).
+  - Callback Webhook `POST /api/v1/public/payments/webhook` dengan validasi tanda tangan digital SHA-512 $\rightarrow$ otomatis mengubah status pesanan ke `PAID` dan memicu WebSocket alert ke dapur secara instan.
+- [ ] **5.4. Cloud Media Storage Upload (DEFERRED)**
+  - S3 / Cloudinary / Supabase storage upload untuk gambar menu & banner promo (ditunda sesuai arahan).

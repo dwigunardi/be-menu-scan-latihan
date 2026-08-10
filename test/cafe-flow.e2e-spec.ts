@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { Reflector } from '@nestjs/core';
+import { createHash } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { GlobalExceptionFilter } from '../src/common/filters/global-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
@@ -10,7 +11,7 @@ import { EncryptPayloadInterceptor } from '../src/common/interceptors/encrypt-pa
 import { EcdhService } from '../src/common/crypto/ecdh.service';
 import { CryptoService } from '../src/common/crypto/crypto.service';
 
-describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
+describe('MenuScan Cafe Full Flow with Pre-Paid QRIS, Real-Time & RBAC (e2e)', () => {
   let app: INestApplication;
   let adminToken: string;
   let cashierToken: string;
@@ -21,6 +22,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
   let variantOptionId: string;
   let createdOrderId: string;
   let orderNumber: string;
+  let totalAmount: number;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -96,7 +98,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
     });
   });
 
-  describe('2. Public Menu Catalog & Ordering Flow', () => {
+  describe('2. Public Menu Catalog & Pre-Paid Ordering Flow', () => {
     it('GET /api/v1/public/menus - should browse menu items', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/public/menus')
@@ -119,7 +121,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
       }
     });
 
-    it('POST /api/v1/public/orders - should place customer order from cart', async () => {
+    it('POST /api/v1/public/orders - should place customer order from cart (PENDING)', async () => {
       const orderPayload = {
         tableId,
         customerName: 'Dwi Gunardi',
@@ -152,20 +154,59 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
 
       createdOrderId = res.body.data.id;
       orderNumber = res.body.data.orderNumber;
+      totalAmount = Number(res.body.data.totalAmount);
     });
 
-    it('GET /api/v1/public/orders/:orderNumber - should track order status', async () => {
+    it('POST /api/v1/public/payments/create-qris - should generate dynamic QRIS payload', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/api/v1/public/orders/${orderNumber}`)
+        .post('/api/v1/public/payments/create-qris')
+        .send({ orderId: createdOrderId })
         .expect(200);
 
       expect(res.body.success).toBe(true);
       expect(res.body.data.orderNumber).toBe(orderNumber);
-      expect(res.body.data.status).toBe('PENDING');
+      expect(res.body.data.qrisString).toBeDefined();
+      expect(res.body.data.transactionId).toBeDefined();
+    });
+
+    it('POST /api/v1/public/payments/webhook - should settle order to PAID via Payment Gateway callback', async () => {
+      const secret = 'menuscan_payment_secret_123456789';
+      const signatureKey = createHash('sha512')
+        .update(`${orderNumber}${totalAmount}${secret}`)
+        .digest('hex');
+
+      const webhookPayload = {
+        orderId: createdOrderId,
+        orderNumber,
+        transactionStatus: 'SETTLEMENT',
+        grossAmount: totalAmount,
+        paymentType: 'QRIS',
+        signatureKey,
+      };
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/public/payments/webhook')
+        .send(webhookPayload)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('PAID');
+      expect(res.body.data.paidAt).toBeDefined();
+    });
+
+    it('GET /api/v1/public/tables/Meja 01/status - persistent session should include order history', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/public/tables/Meja 01/status')
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.activeCustomerName).toBe('Dwi Gunardi');
+      expect(res.body.data.activeOrders.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.data.activeOrders[0].orderNumber).toBe(orderNumber);
     });
   });
 
-  describe('3. Staff Authentication & RBAC Access Controls', () => {
+  describe('3. Staff Authentication, KDS Cooking & Waiter Bussing', () => {
     it('should login all 4 staff roles successfully', async () => {
       // 1. Admin Login
       const adminRes = await request(app.getHttpServer())
@@ -207,7 +248,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
         .expect(403);
     });
 
-    it('RBAC Check: Kitchen role can monitor orders and transition status to PREPARING -> SERVED', async () => {
+    it('Kitchen cooks paid order: PREPARING -> SERVED', async () => {
       // 1. Kitchen updates to PREPARING
       const prepRes = await request(app.getHttpServer())
         .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
@@ -216,7 +257,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
         .expect(200);
       expect(prepRes.body.data.status).toBe('PREPARING');
 
-      // 2. Waiter / Kitchen updates to SERVED
+      // 2. Kitchen / Waiter updates to SERVED
       const servedRes = await request(app.getHttpServer())
         .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
         .set('Authorization', `Bearer ${waiterToken}`)
@@ -225,24 +266,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
       expect(servedRes.body.data.status).toBe('SERVED');
     });
 
-    it('Cashier marks order as PAID -> Table automatically becomes WAITING_CLEANUP', async () => {
-      const paidRes = await request(app.getHttpServer())
-        .patch(`/api/v1/admin/orders/${createdOrderId}/status`)
-        .set('Authorization', `Bearer ${cashierToken}`)
-        .send({ status: 'PAID' })
-        .expect(200);
-
-      expect(paidRes.body.data.status).toBe('PAID');
-      expect(paidRes.body.data.paidAt).toBeDefined();
-
-      // Check table status is now WAITING_CLEANUP
-      const tableStatusRes = await request(app.getHttpServer())
-        .get('/api/v1/public/tables/Meja 01/status')
-        .expect(200);
-      expect(tableStatusRes.body.data.status).toBe('WAITING_CLEANUP');
-    });
-
-    it('Waiter cleans dishes and resets table -> Table becomes VACANT', async () => {
+    it('Waiter cleans table & resets: Table becomes VACANT', async () => {
       const resetRes = await request(app.getHttpServer())
         .post(`/api/v1/admin/tables/${tableId}/reset`)
         .set('Authorization', `Bearer ${waiterToken}`)
@@ -253,7 +277,7 @@ describe('MenuScan Cafe Full Flow with RBAC & Lifecycle (e2e)', () => {
       expect(resetRes.body.data.table.activeCustomerName).toBeNull();
     });
 
-    it('Admin can access consolidated dashboard overview & revenue reports', async () => {
+    it('Admin views dashboard overview and revenue metrics', async () => {
       const overviewRes = await request(app.getHttpServer())
         .get('/api/v1/admin/reports/dashboard-overview')
         .set('Authorization', `Bearer ${adminToken}`)
