@@ -8,6 +8,7 @@ describe('ReportsController', () => {
 
   beforeEach(async () => {
     const mockReportsService = {
+      getDashboardOverview: jest.fn(),
       getRevenueReport: jest.fn(),
       getTopSelling: jest.fn(),
     };
@@ -32,6 +33,31 @@ describe('ReportsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('getDashboardOverview', () => {
+    it('should return aggregated overview metrics for admin dashboard', async () => {
+      const overviewData = {
+        kpi: {
+          todayRevenue: 2500000,
+          todayOrdersCount: 65,
+          activeOrdersCount: 4,
+          tableOccupancy: {
+            totalTables: 10,
+            occupiedTables: 6,
+            occupancyPercentage: 60,
+          },
+        },
+        recentOrders: [],
+        topSellingToday: [],
+      };
+
+      reportsService.getDashboardOverview.mockResolvedValue(overviewData as any);
+
+      const result = await controller.getDashboardOverview();
+      expect(result).toEqual(overviewData);
+      expect(reportsService.getDashboardOverview).toHaveBeenCalled();
+    });
   });
 
   describe('getRevenueReport', () => {
