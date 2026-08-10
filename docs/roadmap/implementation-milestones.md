@@ -1,7 +1,7 @@
 # Implementation Milestones & Project Roadmap
 
 > **Project**: MenuScan – Digital QR Code Menu System  
-> **Backend Framework**: NestJS (TypeScript)  
+> **Backend Framework**: NestJS (TypeScript) + PostgreSQL + Prisma ORM + Multi-Role RBAC  
 > **Document Location**: `docs/roadmap/implementation-milestones.md`  
 > **Status**: Active Project Tracking Document  
 
@@ -15,7 +15,8 @@
 | **Phase 1** | Core Foundation & Infrastructure Modules | ✅ **DONE** | 100% |
 | **Phase 2** | Global Security, Validation & Swagger | ✅ **DONE** | 100% |
 | **Phase 3** | Feature Domain Modules (Business Logic) | ✅ **DONE** | 100% |
-| **Phase 4** | Seeding, Verification & Finalization | ✅ **DONE** | 100% |
+| **Phase 4** | Seeding, Multi-Role RBAC, Pre-Paid Flow & E2E Verification | ✅ **DONE** | 100% |
+| **Phase 5** | Real-Time WebSockets, Redis Caching & Payment Gateway | ⏳ **PLANNED** | 0% |
 
 ---
 
@@ -71,6 +72,7 @@
   - [public.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/public.decorator.ts) -> Bypass JWT Guard.
   - [current-user.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/current-user.decorator.ts) -> Extract `req.user`.
   - [skip-encryption.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/skip-encryption.decorator.ts) -> Bypass Payload Encryption.
+  - [roles.decorator.ts](file:///d:/code/be-menu-scan-latihan/src/common/decorators/roles.decorator.ts) -> Role annotations (`ADMIN`, `CASHIER`, `KITCHEN`, `WAITER`).
 - [x] **2.2. Global Exception Filter** (`src/common/filters/`)
   - [global-exception.filter.ts](file:///d:/code/be-menu-scan-latihan/src/common/filters/global-exception.filter.ts) (Penanganan error terpusat ZodError, PrismaError, & HttpException dengan tag `step: "EXCEPTION_CATCH"`).
 - [x] **2.3. Zod Pipe & Response Transformation** (`nestjs-zod`)
@@ -85,47 +87,70 @@
 
 - [x] **3.1. Auth Module** (`src/modules/auth/`)
   - Endpoint `/api/v1/auth/handshake` (ECDH Key Exchange).
-  - Endpoint `/api/v1/auth/login` (Admin Login + Hash Refresh Token).
+  - Endpoint `/api/v1/auth/login` (Admin/Staff Login + Hash Refresh Token + Role).
   - Endpoint `/api/v1/auth/refresh` (Access Token Renewal).
   - Endpoint `/api/v1/auth/logout` (Revoke Refresh Token).
   - Endpoint `/api/v1/auth/me` (Profile Check).
-  - Passport JWT Strategies (`JwtStrategy`, `JwtRefreshStrategy`) & Global `JwtAuthGuard`.
+  - Passport JWT Strategies (`JwtStrategy`, `JwtRefreshStrategy`) & Global `JwtAuthGuard` + `RolesGuard`.
 - [x] **3.2. Banners Module** (`src/modules/banners/`)
   - Public `GET /api/v1/public/banners` (Return promo banners aktif).
-  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/banners`.
+  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/banners` (`@Roles(ADMIN)`).
 - [x] **3.3. Categories Module** (`src/modules/categories/`)
   - Public `GET /api/v1/public/categories` (Return list kategori + active item count).
-  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/categories`.
+  - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/categories` (`@Roles(ADMIN)`).
   - Admin Reordering Kategori (`PATCH /api/v1/admin/categories/reorder`).
 - [x] **3.4. Menus & Variants Module** (`src/modules/menus/`)
   - Public `GET /api/v1/public/menus` (Filter category, search, availability, best seller, recommended).
   - Public `GET /api/v1/public/menus/:id` (Detail menu + nested variantGroups & options).
   - Admin CRUD `GET`, `POST`, `GET :id`, `PATCH`, `DELETE` `/api/v1/admin/menus`.
-  - Admin Fast Toggle `PATCH /api/v1/admin/menus/:id/status` (`isAvailable`).
+  - Fast Toggle `PATCH /api/v1/admin/menus/:id/status` (`isAvailable`) untuk `ADMIN`, `KITCHEN`, `CASHIER`.
 - [x] **3.5. Tables Module** (`src/modules/tables/`)
-  - Public `GET /api/v1/public/tables/:number/status` (Cek status meja & activeCustomerName).
+  - Public `GET /api/v1/public/tables/:number/status` (Cek status meja, activeCustomerName & persistent session orders history).
   - Public `POST /api/v1/public/tables/:number/session` (Inisialisasi sesi meja & nama pemesan).
-  - Admin `GET /api/v1/admin/tables`, `POST /api/v1/admin/tables`, `POST /api/v1/admin/tables/:id/reset`, `DELETE /api/v1/admin/tables/:id`.
+  - Staff Floor Plan `GET /api/v1/admin/tables`, 1-Tap Reset `POST /api/v1/admin/tables/:id/reset` (`ADMIN`, `CASHIER`, `WAITER`).
 - [x] **3.6. Orders Module** (`src/modules/orders/`)
   - Public `POST /api/v1/public/orders` (Buat pesanan baru dengan snapshot harga & variasi dalam atomic transaction).
   - Public `GET /api/v1/public/orders/:orderNumber` (Status pesanan meja).
-  - Admin `GET /api/v1/admin/orders` (Live Orders Monitor Dapur/Kasir).
-  - Admin `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan & paidAt timestamp).
+  - Staff `GET /api/v1/admin/orders` (Live Orders Monitor KDS Dapur/Kasir).
+  - Staff `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan: PENDING -> PAID -> PREPARING -> SERVED).
 - [x] **3.7. Reports Module** (`src/modules/reports/`)
+  - Admin `GET /api/v1/admin/reports/dashboard-overview` (Consolidated KPI, Recent Orders, Top Selling).
   - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan, Total Order, Average Order Value).
   - Admin `GET /api/v1/admin/reports/top-selling` (Top Menu Paling Laris berdasarkan kuantitas & omset).
 
 ---
 
-## ✅ Phase 4: Database Seeding, Verification & Finalization (COMPLETED)
+## ✅ Phase 4: Database Seeding, RBAC, Pre-Paid Flow & Verification (COMPLETED)
 
 - [x] **4.1. Database Seeder Script** (`prisma/seed.ts`)
-  - Seed Admin default (`admin@menuscan.com` / `admin123`).
-  - Seed Meja default (Meja 01 s/d Meja 10).
+  - Seed 4 Staff Accounts: `admin@menuscan.com` (ADMIN), `cashier@menuscan.com` (CASHIER), `kitchen@menuscan.com` (KITCHEN), `waiter@menuscan.com` (WAITER).
+  - Seed Meja default (`Meja 01` s/d `Meja 10`).
   - Seed Sampel Promo Banners (3 carousel banners).
   - Seed Sampel Kategori (Coffee, Non-Coffee, Local Favorites, Fast Food & Snacks, Desserts).
   - Seed Sampel Menu Kopi dengan Variasi Bersarang (Ukuran, Suhu, Extra Add-ons, Level Pedas, Pilihan Telur, Saus) & Menu tanpa Variasi (Air Mineral).
 - [x] **4.2. End-to-End API Verification** (`test/cafe-flow.e2e-spec.ts`)
-  - Automated testing alur penuh: Public Banners -> QR Scan Meja 01 & Session -> Browse Menu & Variants -> Checkout Order Cart -> Admin Login -> Kitchen Live Monitor Status (PREPARING -> SERVED -> PAID) -> Table Reset VACANT -> Revenue & Top Selling Analytics.
-- [x] **4.3. Final Documentation & Walkthrough Update**
-  - Walkthrough final, unit test coverage (98.81%), dan panduan serah terima proyek.
+  - Automated testing alur penuh: Public Discovery -> QR Scan Meja 01 & Session -> Browse Menu & Variants -> Pre-Paid Checkout -> Staff Login 4 Roles -> RBAC 403 Forbidden check -> KDS Kitchen Status -> Cashier Confirmation -> Waiter 1-Tap Reset Table -> Dashboard Overview Analytics (100% Green).
+- [x] **4.3. Master Documentation Suite**
+  - [master-cafe-activity-flow.md](file:///d:/code/be-menu-scan-latihan/docs/flow/master-cafe-activity-flow.md) (Human-readable complete operational story & activity diagrams).
+  - [frontend-integration-guide.md](file:///d:/code/be-menu-scan-latihan/docs/integration/frontend-integration-guide.md) (Screen-by-screen UI blueprints, Pay-First integration, & persistent session specifications).
+  - [walkthrough.md](file:///d:/code/be-menu-scan-latihan/walkthrough.md) (Architecture overview & testing status).
+
+---
+
+## ⏳ Phase 5: Real-Time WebSockets, Redis Caching & Payment Gateway (PLANNED)
+
+- [ ] **5.1. Real-Time WebSocket Gateway (`@nestjs/websockets` + Socket.IO)**
+  - Implementasi WebSocket Gateway dengan Room-based dispatching:
+    - `room:kitchen`: Push live order baru saat status `PAID` (Instan audio ping & live card inject di KDS).
+    - `room:waiter`: Push notifikasi makanan siap saji (`SERVED`) & meja kotor butuh dibersihkan.
+    - `room:table:<number>`: Push status pesanan ke smartphone pelanggan secara *real-time* (0ms delay, tanpa polling).
+- [ ] **5.2. Redis Caching, Pub/Sub & Distributed Session**
+  - Cache layer untuk katalog menu & kategori (`GET /public/menus`) dengan auto-invalidation saat Admin update data.
+  - Pindahkan penyimpanan session handshake ECDH dari in-memory ke Redis Store.
+  - Redis Pub/Sub Adapter untuk menghubungkan WebSockets antar instance server.
+  - Rate Limiter terdistribusi (`@nestjs/throttler` + Redis).
+- [ ] **5.3. Payment Gateway Webhook Integration**
+  - Integrasi QRIS Dinamis (Midtrans / Xendit / Tripay).
+  - Endpoint Webhook `POST /api/v1/public/payments/webhook` dengan signature validation untuk otomatis mengubah order menjadi `PAID`.
+- [ ] **5.4. Cloud Media Storage Upload**
+  - Endpoint `POST /api/v1/admin/media/upload` (Multer + S3 / Cloudinary / Supabase Storage) untuk upload banner promo & foto menu dari dashboard CMS.
