@@ -1,76 +1,149 @@
-import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { DecryptPayloadMiddleware } from './decrypt-payload.middleware';
 import { EcdhService } from '../crypto/ecdh.service';
 import { CryptoService } from '../crypto/crypto.service';
-import { BadRequestException } from '@nestjs/common';
-import { createECDH } from 'node:crypto';
 
 describe('DecryptPayloadMiddleware', () => {
   let middleware: DecryptPayloadMiddleware;
-  let ecdhService: EcdhService;
-  let cryptoService: CryptoService;
+  let ecdhService: jest.Mocked<EcdhService>;
+  let cryptoService: jest.Mocked<CryptoService>;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [DecryptPayloadMiddleware, EcdhService, CryptoService],
-    }).compile();
+  beforeEach(() => {
+    ecdhService = {
+      getSessionKey: jest.fn(),
+    } as any;
 
-    middleware = module.get<DecryptPayloadMiddleware>(DecryptPayloadMiddleware);
-    ecdhService = module.get<EcdhService>(EcdhService);
-    cryptoService = module.get<CryptoService>(CryptoService);
+    cryptoService = {
+      decrypt: jest.fn(),
+    } as any;
+
+    middleware = new DecryptPayloadMiddleware(ecdhService, cryptoService);
   });
 
-  it('should be defined', () => {
-    expect(middleware).toBeDefined();
+  it('should skip decryption for GET request', () => {
+    const req = {
+      method: 'GET',
+      originalUrl: '/api/v1/public/menus',
+      headers: {},
+      body: {},
+    } as any;
+    const res = {} as any;
+    const next = jest.fn();
+
+    middleware.use(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(cryptoService.decrypt).not.toHaveBeenCalled();
   });
 
-  it('should skip decryption for GET requests or handshake endpoint', () => {
-    const req: any = { method: 'GET', originalUrl: '/api/v1/public/menus', headers: {} };
-    const res: any = {};
+  it('should skip decryption for DELETE request', () => {
+    const req = {
+      method: 'DELETE',
+      originalUrl: '/api/v1/admin/menus/123',
+      headers: {},
+    } as any;
+    const res = {} as any;
     const next = jest.fn();
 
     middleware.use(req, res, next);
     expect(next).toHaveBeenCalled();
   });
 
-  it('should decrypt encrypted request body when x-handshake-token is present', () => {
-    // Perform handshake to get a valid handshakeToken and sessionKey
-    const clientEcdh = createECDH('prime256v1');
-    clientEcdh.generateKeys();
-    const handshake = ecdhService.performHandshake(
-      clientEcdh.getPublicKey('hex'),
-      'nonce-123',
-      'super-secret-app-handshake-key-minimum-32-chars',
-    );
-
-    const sessionKey = ecdhService.getSessionKey(handshake.handshakeToken);
-    const originalBody = { name: 'Kopi Susu', price: 15000 };
-    const envelope = cryptoService.encrypt(JSON.stringify(originalBody), sessionKey);
-
-    const req: any = {
+  it('should skip decryption for handshake endpoint', () => {
+    const req = {
       method: 'POST',
-      originalUrl: '/api/v1/admin/menus',
-      headers: { 'x-handshake-token': handshake.handshakeToken },
-      body: envelope,
-    };
-    const res: any = {};
+      originalUrl: '/api/v1/auth/handshake',
+      headers: {},
+      body: { clientPublicKey: 'abc' },
+    } as any;
+    const res = {} as any;
     const next = jest.fn();
 
     middleware.use(req, res, next);
-
     expect(next).toHaveBeenCalled();
-    expect(req.body).toEqual(originalBody);
+    expect(cryptoService.decrypt).not.toHaveBeenCalled();
   });
 
-  it('should throw BadRequestException if x-handshake-token is missing for encrypted body', () => {
-    const req: any = {
+  it('should skip decryption if body is not encrypted envelope', () => {
+    const req = {
       method: 'POST',
       originalUrl: '/api/v1/admin/menus',
       headers: {},
-      body: { encrypted: true, iv: 'iv', tag: 'tag', payload: 'payload' },
-    };
-    const res: any = {};
+      body: { name: 'Latte', price: 20000 },
+    } as any;
+    const res = {} as any;
     const next = jest.fn();
+
+    middleware.use(req, res, next);
+    expect(next).toHaveBeenCalled();
+    expect(cryptoService.decrypt).not.toHaveBeenCalled();
+  });
+
+  it('should throw BadRequestException if encrypted=true but x-handshake-token is missing', () => {
+    const req = {
+      method: 'POST',
+      originalUrl: '/api/v1/public/orders',
+      headers: {},
+      body: { encrypted: true, iv: 'iv', tag: 'tag', payload: 'payload' },
+    } as any;
+    const res = {} as any;
+    const next = jest.fn();
+
+    expect(() => middleware.use(req, res, next)).toThrow(BadRequestException);
+  });
+
+  it('should successfully decrypt and JSON parse encrypted envelope', () => {
+    const req = {
+      method: 'POST',
+      originalUrl: '/api/v1/public/orders',
+      headers: { 'x-handshake-token': 'token-xyz' },
+      body: {
+        encrypted: true,
+        iv: 'sample-iv',
+        tag: 'sample-tag',
+        payload: 'sample-payload',
+      },
+    } as any;
+    const res = {} as any;
+    const next = jest.fn();
+
+    const mockSessionKey = Buffer.from('mock-session-key-32-bytes-length');
+    ecdhService.getSessionKey.mockReturnValue(mockSessionKey);
+    cryptoService.decrypt.mockReturnValue(JSON.stringify({ tableNumber: '01', customerName: 'Budi' }));
+
+    middleware.use(req, res, next);
+
+    expect(ecdhService.getSessionKey).toHaveBeenCalledWith('token-xyz');
+    expect(cryptoService.decrypt).toHaveBeenCalledWith(
+      {
+        iv: 'sample-iv',
+        tag: 'sample-tag',
+        payload: 'sample-payload',
+      },
+      mockSessionKey,
+    );
+    expect(req.body).toEqual({ tableNumber: '01', customerName: 'Budi' });
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('should throw BadRequestException if decryption fails', () => {
+    const req = {
+      method: 'POST',
+      originalUrl: '/api/v1/public/orders',
+      headers: { 'x-handshake-token': 'token-xyz' },
+      body: {
+        encrypted: true,
+        iv: 'invalid-iv',
+        tag: 'invalid-tag',
+        payload: 'invalid-payload',
+      },
+    } as any;
+    const res = {} as any;
+    const next = jest.fn();
+
+    ecdhService.getSessionKey.mockReturnValue(Buffer.from('key'));
+    cryptoService.decrypt.mockImplementation(() => {
+      throw new Error('Decryption failed');
+    });
 
     expect(() => middleware.use(req, res, next)).toThrow(BadRequestException);
   });
