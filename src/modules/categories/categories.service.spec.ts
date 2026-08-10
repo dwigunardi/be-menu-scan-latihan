@@ -26,6 +26,9 @@ describe('CategoriesService', () => {
         create: jest.fn(),
         update: jest.fn(),
       },
+      menuItem: {
+        count: jest.fn().mockResolvedValue(0),
+      },
       $transaction: jest.fn(),
     };
 
@@ -90,7 +93,7 @@ describe('CategoriesService', () => {
 
   describe('create', () => {
     it('should create a new category with generated slug', async () => {
-      prismaService.category.findUnique.mockResolvedValue(null);
+      prismaService.category.findFirst.mockResolvedValue(null);
       prismaService.category.create.mockResolvedValue(mockCategory);
 
       const result = await service.create({ name: 'Coffee', sortOrder: 1 });
@@ -104,25 +107,8 @@ describe('CategoriesService', () => {
       });
     });
 
-    it('should create a new category with unique slug when previously soft-deleted', async () => {
-      prismaService.category.findUnique.mockResolvedValue({
-        ...mockCategory,
-        deletedAt: new Date(),
-      });
-      prismaService.category.create.mockResolvedValue(mockCategory);
-
-      const result = await service.create({ name: 'Coffee' });
-      expect(result.name).toBe('Coffee');
-      expect(prismaService.category.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          name: 'Coffee',
-          sortOrder: 0,
-        }),
-      });
-    });
-
     it('should throw ConflictException if slug already exists and not deleted', async () => {
-      prismaService.category.findUnique.mockResolvedValue(mockCategory);
+      prismaService.category.findFirst.mockResolvedValue(mockCategory);
 
       await expect(
         service.create({ name: 'Coffee', sortOrder: 1 }),
@@ -132,7 +118,11 @@ describe('CategoriesService', () => {
 
   describe('update', () => {
     it('should update category name and sortOrder', async () => {
-      prismaService.category.findFirst.mockResolvedValue(mockCategory);
+      // First findOne, then findFirst for unique check (returns null meaning slug is unique)
+      prismaService.category.findFirst
+        .mockResolvedValueOnce(mockCategory)
+        .mockResolvedValueOnce(null);
+
       prismaService.category.update.mockResolvedValue({
         ...mockCategory,
         name: 'Specialty Coffee',
@@ -158,6 +148,7 @@ describe('CategoriesService', () => {
   describe('remove', () => {
     it('should soft delete category by setting deletedAt', async () => {
       prismaService.category.findFirst.mockResolvedValue(mockCategory);
+      prismaService.menuItem.count.mockResolvedValue(0);
       prismaService.category.update.mockResolvedValue({
         ...mockCategory,
         deletedAt: new Date(),
@@ -169,6 +160,13 @@ describe('CategoriesService', () => {
         where: { id: 'cat-123' },
         data: { deletedAt: expect.any(Date) },
       });
+    });
+
+    it('should throw ConflictException if category still contains active items', async () => {
+      prismaService.category.findFirst.mockResolvedValue(mockCategory);
+      prismaService.menuItem.count.mockResolvedValue(3);
+
+      await expect(service.remove('cat-123')).rejects.toThrow(ConflictException);
     });
   });
 

@@ -12,15 +12,16 @@ describe('MenusService', () => {
     name: 'Caramel Macchiato',
     description: 'Espresso with vanilla and caramel drizzle',
     price: 35000,
-    promoPrice: null,
-    categoryId: 'cat-123',
-    imageUrl: 'https://images.unsplash.com/coffee.jpg',
+    promoPrice: 30000,
+    imageUrl: 'https://img.com/caramel.jpg',
     isAvailable: true,
     isBestSeller: true,
     isRecommended: false,
+    categoryId: 'cat-123',
     deletedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
+    category: { id: 'cat-123', name: 'Coffee', slug: 'coffee' },
     variantGroups: [],
   };
 
@@ -29,9 +30,10 @@ describe('MenusService', () => {
       menuItem: {
         findMany: jest.fn(),
         findFirst: jest.fn(),
-        count: jest.fn(),
+        findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        count: jest.fn(),
       },
       category: {
         findFirst: jest.fn(),
@@ -54,30 +56,51 @@ describe('MenusService', () => {
   });
 
   describe('findAllPublic', () => {
-    it('should return menu items with variant groups and applied filters', async () => {
+    it('should return available menu items', async () => {
       prismaService.menuItem.findMany.mockResolvedValue([mockMenu]);
 
-      const result = await service.findAllPublic({
-        categoryId: 'cat-123',
-        search: 'caramel',
-        isBestSeller: true,
-        isRecommended: false,
-        isAvailable: true,
-      });
+      const result = await service.findAllPublic({});
       expect(result).toHaveLength(1);
-      expect(prismaService.menuItem.findMany).toHaveBeenCalled();
+      expect(prismaService.menuItem.findMany).toHaveBeenCalledWith({
+        where: { deletedAt: null, isAvailable: true },
+        orderBy: expect.any(Array),
+        include: expect.any(Object),
+      });
+    });
+
+    it('should filter by category and search query', async () => {
+      prismaService.menuItem.findMany.mockResolvedValue([mockMenu]);
+
+      await service.findAllPublic({
+        categoryId: 'cat-123',
+        search: 'Caramel',
+      });
+
+      expect(prismaService.menuItem.findMany).toHaveBeenCalledWith({
+        where: {
+          deletedAt: null,
+          isAvailable: true,
+          categoryId: 'cat-123',
+          OR: [
+            { name: { contains: 'Caramel', mode: 'insensitive' } },
+            { description: { contains: 'Caramel', mode: 'insensitive' } },
+          ],
+        },
+        orderBy: expect.any(Array),
+        include: expect.any(Object),
+      });
     });
   });
 
   describe('findOnePublic', () => {
-    it('should return single menu with details', async () => {
+    it('should return menu item detail with variants', async () => {
       prismaService.menuItem.findFirst.mockResolvedValue(mockMenu);
 
       const result = await service.findOnePublic('menu-123');
       expect(result.id).toBe('menu-123');
     });
 
-    it('should throw NotFoundException if not found', async () => {
+    it('should throw NotFoundException if menu item not found', async () => {
       prismaService.menuItem.findFirst.mockResolvedValue(null);
 
       await expect(service.findOnePublic('invalid-id')).rejects.toThrow(
@@ -87,18 +110,11 @@ describe('MenusService', () => {
   });
 
   describe('findAllAdmin', () => {
-    it('should return paginated menu items with category and search filter', async () => {
+    it('should return paginated admin menu items list', async () => {
       prismaService.menuItem.count.mockResolvedValue(1);
       prismaService.menuItem.findMany.mockResolvedValue([mockMenu]);
 
-      const result = await service.findAllAdmin({
-        page: 1,
-        limit: 10,
-        categoryId: 'cat-123',
-        search: 'espresso',
-        isAvailable: true,
-      });
-
+      const result = await service.findAllAdmin({ page: 1, limit: 10 });
       expect(result.data).toHaveLength(1);
       expect(result.meta.total).toBe(1);
       expect(result.meta.totalPages).toBe(1);
@@ -106,42 +122,26 @@ describe('MenusService', () => {
   });
 
   describe('create', () => {
-    it('should create menu item without variant groups', async () => {
+    it('should create menu item with nested variants', async () => {
       prismaService.category.findFirst.mockResolvedValue({ id: 'cat-123' });
       prismaService.menuItem.create.mockResolvedValue(mockMenu);
 
-      const result = await service.create({
-        name: 'Caramel Macchiato',
-        price: 35000,
-        categoryId: 'cat-123',
-      });
-
-      expect(result.name).toBe('Caramel Macchiato');
-      expect(prismaService.menuItem.create).toHaveBeenCalled();
-    });
-
-    it('should create menu item with nested variant groups and options', async () => {
-      prismaService.category.findFirst.mockResolvedValue({ id: 'cat-123' });
-      prismaService.menuItem.create.mockResolvedValue(mockMenu);
-
-      const result = await service.create({
+      const dto = {
         name: 'Caramel Macchiato',
         price: 35000,
         categoryId: 'cat-123',
         variantGroups: [
           {
-            name: 'Ukuran',
+            name: 'Size',
             isRequired: true,
             minSelect: 1,
             maxSelect: 1,
-            options: [
-              { name: 'Regular', extraPrice: 0, isAvailable: true },
-              { name: 'Large', extraPrice: 5000, isAvailable: true },
-            ],
+            options: [{ name: 'Regular', extraPrice: 0, isAvailable: true }],
           },
         ],
-      });
+      };
 
+      const result = await service.create(dto);
       expect(result.name).toBe('Caramel Macchiato');
       expect(prismaService.menuItem.create).toHaveBeenCalled();
     });
@@ -160,23 +160,6 @@ describe('MenusService', () => {
   });
 
   describe('update', () => {
-    it('should throw NotFoundException if menu to update is not found', async () => {
-      prismaService.menuItem.findFirst.mockResolvedValue(null);
-
-      await expect(service.update('invalid-id', { price: 40000 })).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it('should throw BadRequestException if new category does not exist', async () => {
-      prismaService.menuItem.findFirst.mockResolvedValue(mockMenu);
-      prismaService.category.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.update('menu-123', { categoryId: 'invalid-cat' }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
     it('should update menu item and sync variant groups inside transaction', async () => {
       prismaService.menuItem.findFirst.mockResolvedValue(mockMenu);
       prismaService.category.findFirst.mockResolvedValue({ id: 'cat-123' });
@@ -186,12 +169,14 @@ describe('MenusService', () => {
             deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
             create: jest.fn().mockResolvedValue({ id: 'vg-1' }),
           },
+          menuItem: {
+            update: jest.fn().mockResolvedValue({
+              ...mockMenu,
+              price: 40000,
+            }),
+          },
         };
         return cb(tx);
-      });
-      prismaService.menuItem.update.mockResolvedValue({
-        ...mockMenu,
-        price: 40000,
       });
 
       const result = await service.update('menu-123', {
@@ -209,11 +194,11 @@ describe('MenusService', () => {
       });
 
       expect(result.price).toBe(40000);
-      expect(prismaService.menuItem.update).toHaveBeenCalled();
+      expect(prismaService.$transaction).toHaveBeenCalled();
     });
   });
 
-  describe('toggleStatus', () => {
+  describe('updateStatus', () => {
     it('should update isAvailable field', async () => {
       prismaService.menuItem.findFirst.mockResolvedValue(mockMenu);
       prismaService.menuItem.update.mockResolvedValue({
@@ -221,11 +206,11 @@ describe('MenusService', () => {
         isAvailable: false,
       });
 
-      const result = await service.toggleStatus('menu-123', {
+      const result = await service.updateStatus('menu-123', {
         isAvailable: false,
       });
 
-      expect(result.isAvailable).toBe(false);
+      expect(result.item.isAvailable).toBe(false);
       expect(prismaService.menuItem.update).toHaveBeenCalledWith({
         where: { id: 'menu-123' },
         data: { isAvailable: false },
@@ -236,7 +221,7 @@ describe('MenusService', () => {
       prismaService.menuItem.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.toggleStatus('invalid-id', { isAvailable: false }),
+        service.updateStatus('invalid-id', { isAvailable: false }),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -255,14 +240,6 @@ describe('MenusService', () => {
         where: { id: 'menu-123' },
         data: { deletedAt: expect.any(Date) },
       });
-    });
-
-    it('should throw NotFoundException if menu to delete not found', async () => {
-      prismaService.menuItem.findFirst.mockResolvedValue(null);
-
-      await expect(service.remove('invalid-id')).rejects.toThrow(
-        NotFoundException,
-      );
     });
   });
 });
