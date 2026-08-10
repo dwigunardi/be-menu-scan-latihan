@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+const booleanStringSchema = (defaultValue: boolean) =>
+  z
+    .union([z.boolean(), z.string()])
+    .transform((val) => {
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'string') {
+        const lower = val.trim().toLowerCase();
+        return lower === 'true' || lower === '1' || lower === 'yes';
+      }
+      return defaultValue;
+    })
+    .default(defaultValue);
+
 export const envSchema = z.object({
   // Application & Server
   PORT: z.coerce.number().default(5000),
@@ -25,13 +38,13 @@ export const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().default(''),
   REDIS_DB: z.coerce.number().default(0),
-  REDIS_ENABLED: z.coerce.boolean().default(true),
+  REDIS_ENABLED: booleanStringSchema(true),
 
   // Payment Gateway
   PAYMENT_WEBHOOK_SECRET: z.string().default('menuscan_payment_secret_123456789'),
 
   // Logging Strategy
-  LOG_TO_FILE: z.coerce.boolean().default(false),
+  LOG_TO_FILE: booleanStringSchema(false),
   LOG_FILE_PATH: z.string().default('./logs'),
   LOG_RETENTION_DAYS: z.coerce.number().default(14),
 });

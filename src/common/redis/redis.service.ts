@@ -16,11 +16,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const isEnabled = this.configService.get<boolean>('REDIS_ENABLED', true);
+    const rawEnabled = this.configService.get('REDIS_ENABLED');
+    const isEnabled = rawEnabled === true || rawEnabled === 'true' || rawEnabled === 1;
     if (!isEnabled) {
       this.logger.log({
         step: 'REDIS_INIT',
-        msg: 'Redis is disabled via REDIS_ENABLED=false config',
+        msg: 'Redis is disabled via REDIS_ENABLED=false config (Operating in in-memory mode)',
       });
       return;
     }
