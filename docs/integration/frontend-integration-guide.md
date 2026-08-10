@@ -1,33 +1,46 @@
 # 📱 MenuScan – Master Frontend Integration & Application Architecture Guide
 
 > **Target Audience**: Frontend Engineers (React, Next.js, Vue, Flutter, Web / PWA), UI/UX Designers, Product Managers  
-> **Backend Architecture**: NestJS 11 + PostgreSQL + Prisma ORM + ECDH / AES-256-GCM + Role-Based Access Control (RBAC)  
+> **Backend Architecture**: NestJS 11 + PostgreSQL + Prisma ORM + Redis Cache + WebSockets (Socket.IO) + Multi-Role RBAC  
 > **Ordering Model**: **Pre-Paid (Bayar di Awal / Pay-at-Order) + Persistent Multi-Batch Session**  
+> **Architecture Pattern**: **Either / Result Pattern (Railway-Oriented) + Double-Sided Zod Contract Hardening**  
 > **API Base URL**: `http://localhost:5000/api/v1`  
+> **WebSocket Gateway URL**: `ws://localhost:5000/events` (Socket.IO)  
 > **Interactive Swagger OpenAPI**: `http://localhost:5000/api/docs`  
-> **Status**: **Production Ready & Complete (Phases 0–4 Verified)**
+> **Status**: **Production Ready & Complete (Phases 0–5 Verified)**
 
 ---
 
 ## 📑 Daftar Isi
+
 1. [Executive Summary & Pre-Paid Model Concept](#1-executive-summary--pre-paid-model-concept)
 2. [Arsitektur RBAC & 4 Peran Staff (Role-Based Access Control)](#2-arsitektur-rbac--4-peran-staff-role-based-access-control)
-3. [Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)](#3-alur-bisnis--user-journey-terpadu-pre-paid-flow)
+3. [Arsitektur Frontend Hardening & Either / Result Pattern (1 Jalur Terpusat)](#3-arsitektur-frontend-hardening--either--result-pattern-1-jalur-terpusat)
+   - [A. Prinsip Railway-Oriented Programming (Left vs Right)](#a-prinsip-railway-oriented-programming-left-vs-right)
+   - [B. Template File Types & Kontrak Error (`types/api.ts`)](#b-template-file-types--kontrak-error-typesapits)
+   - [C. Template Single Gateway Client (`lib/api-client.ts`)](#c-template-single-gateway-client-libapi-clientts)
+   - [D. Template Skema Kontrak Zod (`schemas/menu.schema.ts`, `order.schema.ts`)](#d-template-skema-kontrak-zod-schemasmenuschemats-orderschemats)
+   - [E. Contoh Pemakaian di Komponen UI / Hook React / Next.js](#e-contoh-pemakaian-di-komponen-ui--hook-react--nextjs)
+4. [Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)](#4-alur-bisnis--user-journey-terpadu-pre-paid-flow)
    - [A. Customer Journey (Scan Meja $\rightarrow$ Pre-Paid $\rightarrow$ Rating $\rightarrow$ Tambah Pesanan)](#a-customer-journey-scan-meja--pre-paid--rating--tambah-pesanan)
    - [B. Kitchen KDS Journey (Hanya Masak Pesanan yang Sudah LUNAS / PAID)](#b-kitchen-kds-journey-hanya-masak-pesanan-yang-sudah-lunas--paid)
    - [C. Cashier POS Journey (Konfirmasi Bayar Cash / EDC)](#c-cashier-pos-journey-konfirmasi-bayar-cash--edc)
    - [D. Waiter Mobile Journey (Pengantaran Makanan & 1-Tap Reset Meja)](#d-waiter-mobile-journey-pengantaran-makanan--1-tap-reset-meja)
-4. [Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)](#4-pemetaan-layar-frontend-screen-by-screen-ui-blueprints)
+5. [Integrasi Real-Time WebSockets (Socket.IO)](#5-integrasi-real-time-websockets-socketio)
+   - [A. Cara Connect ke WebSocket Gateway](#a-cara-connect-ke-websocket-gateway)
+   - [B. Room Subscriptions & Event Catalog](#b-room-subscriptions--event-catalog)
+6. [Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)](#6-pemetaan-layar-frontend-screen-by-screen-ui-blueprints)
    - [A. Customer Mobile Web App (Screens 1 – 6)](#a-customer-mobile-web-app-screens-1--6)
    - [B. Proper Admin & Staff Dashboard Suite (Screens A – E)](#b-proper-admin--staff-dashboard-suite-screens-a--e)
-5. [Spesifikasi Teknis Integrasi API](#5-spesifikasi-teknis-integrasi-api)
+7. [Spesifikasi Teknis Integrasi API & Backend Hardening](#7-spesifikasi-teknis-integrasi-api--backend-hardening)
    - [A. Standard Envelope Response Format](#a-standard-envelope-response-format)
    - [B. Sesi Meja Persisten & Struktur Active Orders](#b-sesi-meja-persisten--struktur-active-orders)
    - [C. Logika Perhitungan Harga Varian di Frontend (Cart Formula)](#c-logika-perhitungan-harga-varian-di-frontend-cart-formula)
    - [D. State Machine Siklus Hidup Pesanan & Meja](#d-state-machine-siklus-hidup-pesanan--meja)
-6. [Katalog Endpoint & Contoh Payload Lengkap](#6-katalog-endpoint--contoh-payload-lengkap)
+   - [E. Backend Response Hardening dengan `@ZodResponse`](#e-backend-response-hardening-dengan-zodresponse)
+8. [Katalog Endpoint & Contoh Payload Lengkap](#8-katalog-endpoint--contoh-payload-lengkap)
    - [1. Default Credentials untuk Testing 4 Role Staff](#1-default-credentials-untuk-testing-4-role-staff)
-   - [2. Modul Public (Customer)](#2-modul-public-customer)
+   - [2. Modul Public (Customer, QRIS & Tracking)](#2-modul-public-customer-qris--tracking)
    - [3. Modul Auth & Staff Profile](#3-modul-auth--staff-profile)
    - [4. Modul Admin & Staff Operations (KDS, Floor Plan, Menu)](#4-modul-admin--staff-operations-kds-floor-plan-menu)
    - [5. Modul Executive Dashboard Overview & Financial Reports](#5-modul-executive-dashboard-overview--financial-reports)
@@ -39,11 +52,10 @@
 **MenuScan** mengadopsi model **Pre-Paid (Bayar di Awal)** yang umum digunakan pada cafe modern (*Starbucks, Fore, Kopi Kenangan*):
 
 1. **Anti-Dine & Dash & Dapur Aman**: Dapur dan barista **hanya memasak pesanan yang sudah berstatus LUNAS (`PAID`)**.
-2. **Pilihan Pembayaran Fleksibel**:
-   - **Bayar Online Instan di HP**: Scan QRIS dinamis / E-Wallet / mBanking $\rightarrow$ Order langsung `PAID` dan masuk antrean dapur.
-   - **Bayar di Kasir**: Tamu membawa nomor order ke kasir $\rightarrow$ Bayar tunai/debit $\rightarrow$ Kasir konfirmasi `PAID` $\rightarrow$ Order masuk antrean dapur.
-3. **Sesi Meja Persisten (Multi-Batch Order)**: Tamu yang sedang nongkrong bisa scan ulang meja kapan saja untuk melihat riwayat pesanan (Batch 1, Batch 2) dan menambah pesanan baru tanpa perlu menginput nama ulang.
-4. **Zero Burden on Customer Exit (Opsi A)**: Tamu tidak dibebani tombol kosongkan meja. Saat tamu selesai dan pulang, Waiter yang melihat meja kosong akan membersihkan piring/gelas kotor dan melakukan 1-tap reset meja kembali menjadi `VACANT`.
+2. **Real-Time Synchronized**: Menggunakan **WebSockets (Socket.IO)** sehingga pesanan baru langsung memicu bel alarm di KDS dapur dengan **0ms delay**, dan layar HP tamu otomatis terupdate saat makanan tiba tanpa perlu polling.
+3. **High-Performance Redis Caching**: Katalog menu dan sesi handshake di-cache menggunakan **Redis** untuk response time secepat kilat (< 2ms).
+4. **Sesi Meja Persisten (Multi-Batch Order)**: Tamu yang sedang nongkrong bisa scan ulang meja kapan saja untuk melihat riwayat pesanan (Batch 1, Batch 2) dan menambah pesanan baru tanpa perlu menginput nama ulang.
+5. **Zero Burden on Customer Exit (Opsi A)**: Tamu tidak dibebani tombol kosongkan meja. Saat tamu selesai dan pulang, Waiter yang melihat meja kosong akan membersihkan piring/gelas kotor dan melakukan 1-tap reset meja kembali menjadi `VACANT`.
 
 ---
 
@@ -55,30 +67,272 @@ Backend MenuScan diamankan dengan **Guards RBAC Global (`RolesGuard`)** yang mem
 graph TD
     User["👤 Staff User Login (/api/v1/auth/login)"] --> Token["JWT Token (Payload: sub, email, name, role)"]
     Token --> RolesGuard{"RolesGuard Verification"}
-    
+
     RolesGuard -->|👑 ADMIN| AccessAdmin["Full Access: CMS Menus, Pricing, Banners, Staff, Table Layout, Financial Reports"]
     RolesGuard -->|💵 CASHIER| AccessCashier["POS Floor Plan, Confirm Cash PAID, Print Receipts"]
     RolesGuard -->|👨‍🍳 KITCHEN| AccessKitchen["KDS Kanban Board (Hanya Masak Order PAID), Fast Toggle Out-of-Stock"]
     RolesGuard -->|🤵 WAITER| AccessWaiter["Mobile Staff View: Deliver Ready Orders, Clean Dishes & Reset Table to VACANT"]
 ```
 
-### 📋 Matriks Hak Akses Peran Staff
+---
 
-| Fitur / Endpoint | `ADMIN` | `CASHIER` | `KITCHEN` | `WAITER` | Catatan Keamanan |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **Laporan Omset & Dashboard KPI** (`/admin/reports/*`) | ✅ | ❌ | ❌ | ❌ | Data rahasia omset cafe |
-| **CMS Banners & Kategori** (`/admin/banners`, `/categories`) | ✅ | ❌ | ❌ | ❌ | Hak manajemen marketing |
-| **CRUD Menu & Atur Harga** (`POST/PATCH/DELETE /admin/menus`) | ✅ | ❌ | ❌ | ❌ | Hak kontrol harga produk |
-| **Fast Toggle Stok Habis** (`PATCH /admin/menus/:id/status`) | ✅ | ✅ | ✅ | ❌ | Dapur bisa langsung matikan menu yang habis |
-| **Live Order Monitor** (`GET /admin/orders`) | ✅ | ✅ | ✅ | ✅ | Visibilitas operasional bersama |
-| **Status Order $\rightarrow$ PREPARING / SERVED** | ✅ | ❌ | ✅ | ✅ | Koki memasak, Waiter mengantar |
-| **Status Order $\rightarrow$ PAID (Cashier Confirmation)** | ✅ | ✅ | ❌ | ❌ | Kasir konfirmasi bayar tunai |
-| **Floor Plan Meja** (`GET /admin/tables`) | ✅ | ✅ | ❌ | ✅ | Monitoring keterisian meja |
-| **Reset Meja ke VACANT** (`POST /admin/tables/:id/reset`) | ✅ | ✅ | ❌ | ✅ | Waiter bersihkan meja & set siap pakai |
+## 3. Arsitektur Frontend Hardening & Either / Result Pattern (1 Jalur Terpusat)
+
+Untuk menjamin aplikasi Frontend tahan banting (*bulletproof*), bebas dari *try-catch hell*, dan tidak mengalami crash layar putih (*white screen of death*), Frontend wajib menerapkan pola **Single Gateway + Either / Result Pattern**:
+
+### A. Prinsip Railway-Oriented Programming (Left vs Right)
+
+```
+               [ Komponen UI (Button / Page / Hook) ]
+                                │
+                                ▼
+         [ apiClient({ url, method, requestSchema, responseSchema }) ]
+                                │
+    ┌───────────────────────────┴───────────────────────────┐
+    ▼                                                       ▼
+[ 🔴 LEFT: Error Path ]                                [ 🟢 RIGHT: Success Path ]
+• 400 Zod Client Validation Error                      • Validasi Zod Response Lolos
+• 401 Unauthorized (Auto Refresh Token)                • Tipe Data 100% Terjamin (Safe)
+• 403 Forbidden                                        • Unwrap Data dari Envelope
+• 500 Network / Server Error                           
+    │                                                       │
+    └───────────────────────────┬───────────────────────────┘
+                                ▼
+                 [ Return: Result<TData, TError> ]
+              { ok: true, data } OR { ok: false, error }
+```
 
 ---
 
-## 3. Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)
+### B. Template File Types & Kontrak Error (`types/api.ts`)
+
+```typescript
+// types/api.ts
+
+export type Result<TData, TError = ApiError> =
+  | { ok: true; data: TData }
+  | { ok: false; error: TError };
+
+export interface ApiError {
+  statusCode: number;
+  error: string;
+  message: string;
+  fieldErrors?: Array<{ field: string; message: string }>;
+  requestId?: string;
+}
+
+// Amplop mentah dari Backend NestJS
+export interface BackendEnvelope<T> {
+  success: boolean;
+  statusCode: number;
+  data: T;
+}
+```
+
+---
+
+### C. Template Single Gateway Client (`lib/api-client.ts`)
+
+```typescript
+// lib/api-client.ts
+import { z, ZodSchema } from 'zod';
+import { Result, ApiError, BackendEnvelope } from '../types/api';
+
+interface ApiRequestConfig<TReq, TRes> {
+  url: string;
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  body?: unknown;
+  headers?: Record<string, string>;
+  requestSchema?: ZodSchema<TReq>;
+  responseSchema: ZodSchema<TRes>;
+}
+
+export async function requestApi<TReq, TRes>(
+  config: ApiRequestConfig<TReq, TRes>,
+): Promise<Result<TRes, ApiError>> {
+  try {
+    // 1. HARDENING INPUT (Request Validation)
+    let validatedBody = config.body;
+    if (config.requestSchema && config.body) {
+      const parsedReq = config.requestSchema.safeParse(config.body);
+      if (!parsedReq.success) {
+        return {
+          ok: false,
+          error: {
+            statusCode: 400,
+            error: 'Client Validation Error',
+            message: 'Data request frontend tidak valid sebelum dikirim.',
+            fieldErrors: parsedReq.error.issues.map((i) => ({
+              field: i.path.join('.'),
+              message: i.message,
+            })),
+          },
+        };
+      }
+      validatedBody = parsedReq.data;
+    }
+
+    // 2. HTTP FETCH (Dengan Token & Header Otomatis)
+    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const response = await fetch(`http://localhost:5000/api/v1${config.url}`, {
+      method: config.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...config.headers,
+      },
+      body: validatedBody ? JSON.stringify(validatedBody) : undefined,
+    });
+
+    const rawJson = await response.json();
+
+    // 3. JIKA STATUS CODE GAGAL (HTTP Error 4xx / 5xx) -> Jalur LEFT
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: {
+          statusCode: rawJson.statusCode || response.status,
+          error: rawJson.error || 'HttpError',
+          message: rawJson.message || 'Terjadi kesalahan pada server.',
+          fieldErrors: rawJson.errors,
+          requestId: rawJson.requestId,
+        },
+      };
+    }
+
+    // 4. HARDENING OUTPUT (Response Validation terhadap Schema Zod) -> Jalur RIGHT
+    const envelope = rawJson as BackendEnvelope<unknown>;
+    const parsedRes = config.responseSchema.safeParse(envelope.data);
+
+    if (!parsedRes.success) {
+      console.error('❌ Server Response Mismatched Schema:', parsedRes.error);
+      return {
+        ok: false,
+        error: {
+          statusCode: 500,
+          error: 'Response Parse Error',
+          message: 'Data dari server tidak sesuai dengan kontrak TypeScript/Zod.',
+        },
+      };
+    }
+
+    // Berhasil dan lolos validasi runtime!
+    return {
+      ok: true,
+      data: parsedRes.data,
+    };
+  } catch (err: any) {
+    // 5. NETWORK FAILURE / OFFLINE
+    return {
+      ok: false,
+      error: {
+        statusCode: 0,
+        error: 'NetworkError',
+        message: err.message || 'Koneksi internet bermasalah. Silakan periksa jaringan Anda.',
+      },
+    };
+  }
+}
+```
+
+---
+
+### D. Template Skema Kontrak Zod (`schemas/menu.schema.ts`, `order.schema.ts`)
+
+```typescript
+// schemas/menu.schema.ts
+import { z } from 'zod';
+
+export const VariantOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  extraPrice: z.number(),
+  isAvailable: z.boolean(),
+});
+
+export const VariantGroupSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isRequired: z.boolean(),
+  minSelect: z.number(),
+  maxSelect: z.number(),
+  options: z.array(VariantOptionSchema),
+});
+
+export const MenuItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  price: z.number(),
+  promoPrice: z.number().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
+  rating: z.number().optional(),
+  reviewCount: z.number().optional(),
+  isAvailable: z.boolean(),
+  isBestSeller: z.boolean(),
+  isRecommended: z.boolean(),
+  variantGroups: z.array(VariantGroupSchema).optional(),
+});
+
+export const MenuListResponseSchema = z.array(MenuItemSchema);
+
+export type MenuItem = z.infer<typeof MenuItemSchema>;
+```
+
+---
+
+### E. Contoh Pemakaian di Komponen UI / Hook React / Next.js
+
+```typescript
+// components/MenuList.tsx
+import React, { useEffect, useState } from 'react';
+import { requestApi } from '../lib/api-client';
+import { MenuListResponseSchema, MenuItem } from '../schemas/menu.schema';
+
+export function MenuList() {
+  const [menus, setMenus] = useState<MenuItem[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadMenus() {
+      // 1 Jalur Request dengan Hardening Response Otomatis
+      const result = await requestApi({
+        url: '/public/menus',
+        method: 'GET',
+        responseSchema: MenuListResponseSchema,
+      });
+
+      // Jalur Gagal (LEFT)
+      if (!result.ok) {
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      // Jalur Sukses (RIGHT) -> result.data 100% aman, typed & verified!
+      setMenus(result.data);
+    }
+
+    loadMenus();
+  }, []);
+
+  if (errorMessage) return <div className="error-banner">{errorMessage}</div>;
+
+  return (
+    <div className="grid-catalog">
+      {menus.map((item) => (
+        <div key={item.id} className="card-menu">
+          <h3>{item.name}</h3>
+          <p>Rp {item.price.toLocaleString()}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## 4. Alur Bisnis & User Journey Terpadu (Pre-Paid Flow)
 
 ### A. Customer Journey (Scan Meja $\rightarrow$ Pre-Paid $\rightarrow$ Rating $\rightarrow$ Tambah Pesanan)
 
@@ -88,51 +342,103 @@ sequenceDiagram
     actor Customer as 📱 Pelanggan
     participant FE as 🌐 Frontend Web (Customer)
     participant BE as ⚙️ Backend API (/api/v1)
-    actor Cashier as 💵 Kasir POS
-    actor Kitchen as 👨‍🍳 Koki Dapur
+    actor Kitchen as 👨‍🍳 Koki Dapur (KDS)
     actor Waiter as 🤵 Pelayan
 
     Note over Customer,BE: STEP 1: Scan QR Meja & Sesi
-    Customer->>FE: Buka URL: https://menu.cafe.com/?table=Meja%2001
+    Customer->>FE: Scan QR: https://menu.cafe.com/?table=Meja%2001
     FE->>BE: GET /public/tables/Meja%2001/status
-    BE-->>FE: 200 OK (Status: VACANT 🟢)
-    FE->>Customer: Pop-up: "Selamat Datang! Masukkan Nama Anda"
-    Customer->>FE: Input: "Dwi Gunardi"
-    FE->>BE: POST /public/tables/Meja%2001/session { customerName: "Dwi Gunardi" }
-    BE-->>FE: 200 OK (Sesi Meja 01 Aktif -> OCCUPIED 🟡)
+    BE-->>FE: Status: VACANT 🟢
+    Customer->>FE: Input Nama: "Dwi Gunardi" -> POST /public/tables/Meja%2001/session
+    BE-->>FE: Sesi Meja 01 Aktif (OCCUPIED 🟡)
 
-    Note over Customer,Cashier: STEP 2: Checkout & Bayar di Awal (Pre-Paid)
-    Customer->>FE: Pilih Caramel Macchiato & Nasi Goreng
-    Customer->>FE: Klik "Lanjut ke Pembayaran"
+    Note over Customer,BE: STEP 2: Checkout & Bayar Dynamic QRIS di HP
+    Customer->>FE: Pilih Caramel Macchiato & Nasi Goreng -> Klik Bayar
     FE->>BE: POST /public/orders (Batch 1) -> Status: PENDING 🟡
-    alt Pilihan A: Bayar QRIS Instan di HP
-        Customer->>FE: Scan QRIS / Bayar E-Wallet di HP
-        FE->>BE: Payment Callback / Status -> PAID 💵
-    else Pilihan B: Bayar Tunai di Kasir
-        Customer->>Cashier: Sebutkan #ORD-001 di Kasir & Bayar Cash
-        Cashier->>BE: PATCH /admin/orders/:id/status { status: "PAID" }
-    end
+    FE->>BE: POST /public/payments/create-qris -> Dapat QRIS String
+    Customer->>FE: Bayar QRIS via GoPay / BCA / DANA
+    Note over BE: Payment Gateway Webhook memverifikasi bayar -> Status: PAID 💵!
 
-    Note over Kitchen,Waiter: STEP 3: Dapur Masak & Waiter Antar
-    BE-->>Kitchen: Order #ORD-001 (PAID) Muncul di KDS Dapur!
-    Kitchen->>BE: PATCH status -> PREPARING 🔵 -> SERVED 🟢
-    Waiter->>Customer: Antarkan makanan ke Meja 01
+    Note over BE,Kitchen: STEP 3: Real-Time Alert KDS Dapur (0ms Delay)
+    BE-->>Kitchen: 🔔 WebSocket emit "order:new" -> Bel KDS Berbunyi!
+    Kitchen->>BE: Koki masak (PREPARING) -> Matang (SERVED)
 
-    Note over Customer,BE: STEP 4: Double-Check & Rating Ulasan
-    FE->>Customer: Layar HP: "Makanan Telah Tiba! 🍽️"
-    Customer->>FE: Klik [✅ Konfirmasi Diterima]
-    FE->>Customer: Muncul Modal Splash Ulasan: [ ⭐ ⭐ ⭐ ⭐ ⭐ ]
-
-    Note over Customer,BE: STEP 5: Sesi Persisten & Tambah Pesanan (Batch 2)
-    Note over Customer: 30 menit kemudian, ingin nambah Croissant
-    Customer->>FE: Buka web/scan QR lagi -> Tampil: "Halo Kak Dwi!" + Riwayat Batch 1
-    Customer->>FE: Klik [➕ Tambah Pesanan Baru] -> Pilih Croissant -> Bayar QRIS (Batch 2)
-    Kitchen->>BE: Dapur Masak Batch 2 -> Diantar Waiter
+    Note over Waiter,Customer: STEP 4: Pengantaran & Ulasan Bintang
+    Waiter->>Customer: Antarkan hidangan ke Meja 01
+    BE-->>FE: 🍽️ WebSocket emit "order:status_changed" -> "Makanan Telah Tiba!"
+    Customer->>FE: Klik [Konfirmasi Diterima] -> Muncul Splash Rating ⭐ 5/5
 ```
 
 ---
 
-## 4. Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)
+## 5. Integrasi Real-Time WebSockets (Socket.IO)
+
+### A. Cara Connect ke WebSocket Gateway
+
+Frontend menggunakan library `socket.io-client`:
+
+```typescript
+import { io } from 'socket.io-client';
+
+const socket = io('http://localhost:5000/events', {
+  transports: ['websocket'],
+});
+
+socket.on('connect', () => {
+  console.log('Connected to MenuScan Real-Time Gateway, socket ID:', socket.id);
+});
+```
+
+---
+
+### B. Room Subscriptions & Event Catalog
+
+#### 1. Tablet KDS Dapur (Kitchen)
+```typescript
+// Join room dapur saat layar KDS dibuka
+socket.emit('join:kitchen');
+
+// Dengarkan pesanan baru yang sudah LUNAS (PAID)
+socket.on('order:new', (payload) => {
+  console.log('Pesanan Baru Masuk!', payload.order);
+  // Mainkan audio suara bel dapur:
+  playAudioAlert('/sounds/kitchen_bell.mp3');
+});
+```
+
+#### 2. Layar Pelayan (Waiter Mobile)
+```typescript
+// Join room pelayan saat staff waiter login
+socket.emit('join:waiter');
+
+// Dengarkan makanan siap saji atau meja butuh dibersihkan
+socket.on('order:status_changed', (payload) => {
+  if (payload.status === 'SERVED') {
+    showNotification(`Hidangan ${payload.orderNumber} siap diantar ke ${payload.tableNumber}`);
+  }
+});
+
+socket.on('table:status_changed', (payload) => {
+  console.log(`Status Meja ${payload.number} berubah menjadi ${payload.status}`);
+});
+```
+
+#### 3. Smartphone Pelanggan (Customer Table Tracker)
+```typescript
+// Join room meja spesifik (misal Meja 01)
+socket.emit('join:table', { tableNumber: 'Meja 01' });
+
+// Dengarkan status makanan saat dimasak / diantar
+socket.on('order:status_changed', (payload) => {
+  if (payload.status === 'SERVED') {
+    triggerFoodArrivedModal();
+  }
+});
+```
+
+---
+
+## 6. Pemetaan Layar Frontend (Screen-by-Screen UI Blueprints)
 
 ### A. Customer Mobile Web App (Screens 1 – 6)
 
@@ -153,13 +459,13 @@ sequenceDiagram
 ├──────────────────────────┼──────────────────────────┼──────────────────────────────────┤
 │ Screen 4: Pembayaran HP  │ Screen 5: Live Tracking  │ Screen 6: Persistent Session     │
 ├──────────────────────────┼──────────────────────────┼──────────────────────────────────┤
-│ 💳 PILIH METODE BAYAR    │ 🧾 Status Pesanan #ORD-01│ 📍 MEJA 01 • SESI AKTIF (Dwi G)  │
+│ 💳 BAYAR QRIS INSTAN     │ 🧾 Status Pesanan #ORD-01│ 📍 MEJA 01 • SESI AKTIF (Dwi G)  │
 │ ──────────────────────── │ 🟢 1. Lunas / PAID       │ ──────────────────────────────── │
-│ 🔘 [📱 QRIS / E-Wallet ] │ 🟡 2. Sedang Dimasak     │ 📜 RIWAYAT PESANAN MEJA INI:     │
-│    (GoPay, OVO, BCA, DANA│ 🍽️ 3. Makanan Tiba      │ • Batch 1: #ORD-001 (LUNAS/SERVED│
-│                          │ [ ✅ Konfirmasi Diterima]│   1x Caramel Macchiato           │
-│ 🔘 [💵 Bayar di Kasir ]  │ ──────────────────────── │   1x Nasi Goreng Spesial Cafe    │
-│    (Tunjukkan #ORD-001)  │ 🌟 BAGAIMANA PESANAN?    │ ──────────────────────────────── │
+│ [  QRIS BARCODE IMAGE  ] │ 🔵 2. Sedang Dimasak     │ 📜 RIWAYAT PESANAN MEJA INI:     │
+│   Total: Rp 86.000       │ 🍽️ 3. Makanan Tiba      │ • Batch 1: #ORD-001 (LUNAS/SERVED│
+│   Expires: 14:59         │ [ ✅ Konfirmasi Diterima]│   1x Caramel Macchiato           │
+│ ──────────────────────── │ ──────────────────────── │   1x Nasi Goreng Spesial Cafe    │
+│ [ 💾 Unduh QRIS / Bayar] │ 🌟 BAGAIMANA PESANAN?    │ ──────────────────────────────── │
 │                          │ [ ⭐ ⭐ ⭐ ⭐ ⭐ ]       │ [ ➕ TAMBAH PESANAN KE MEJA 01 ] │
 │ [ ⚡ Bayar Sekarang ]    │ [ Kirim Ulasan ]         │                                  │
 └──────────────────────────┴──────────────────────────┴──────────────────────────────────┘
@@ -192,7 +498,7 @@ sequenceDiagram
 
 ---
 
-## 5. Spesifikasi Teknis Integrasi API
+## 7. Spesifikasi Teknis Integrasi API & Backend Hardening
 
 ### A. Standard Envelope Response Format
 
@@ -293,60 +599,66 @@ stateDiagram-v2
 
 ---
 
-## 6. Katalog Endpoint & Contoh Payload Lengkap
+### E. Backend Response Hardening dengan `@ZodResponse`
 
-### 1. Default Credentials untuk Testing 4 Role Staff
-
-| Role Staff | Email Login | Password | Akses Halaman |
-| :--- | :--- | :--- | :--- |
-| 👑 **ADMIN** | `admin@menuscan.com` | `admin123` | Semua Layar (Executive Overview, CMS Menu, Banner, Meja, Laporan) |
-| 💵 **CASHIER** | `cashier@menuscan.com` | `cashier123` | Layar POS Floor Plan, Konfirmasi Bayar Cash (`PAID`), Fast Toggle Stok |
-| 👨‍🍳 **KITCHEN** | `kitchen@menuscan.com` | `kitchen123` | Layar KDS Kanban Dapur (`PREPARING` $\rightarrow$ `SERVED`), Fast Toggle Stok |
-| 🤵 **WAITER** | `waiter@menuscan.com` | `waiter123` | Layar Mobile Waiter (Antar `SERVED` & Reset Meja `VACANT`) |
+Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini memastikan:
+1. Respon backend **divalidasi secara runtime** sebelum dikirim ke jaringan.
+2. Field internal atau sensitif dari database **secara otomatis dibersihkan / di-strip**.
+3. Struktur respon 100% konsisten dengan skema Zod di Frontend.
 
 ---
 
-### 2. Modul Public (Customer)
+## 8. Katalog Endpoint & Contoh Payload Lengkap
+
+### 1. Default Credentials untuk Testing 4 Role Staff
+
+| Role Staff     | Email Login            | Password     | Akses Halaman                                                                 |
+| :------------- | :--------------------- | :----------- | :---------------------------------------------------------------------------- |
+| 👑 **ADMIN**   | `admin@menuscan.com`   | `admin123`   | Semua Layar (Executive Overview, CMS Menu, Banner, Meja, Laporan)             |
+| 💵 **CASHIER** | `cashier@menuscan.com` | `cashier123` | Layar POS Floor Plan, Konfirmasi Bayar Cash (`PAID`), Fast Toggle Stok        |
+| 👨‍🍳 **KITCHEN** | `kitchen@menuscan.com` | `kitchen123` | Layar KDS Kanban Dapur (`PREPARING` $\rightarrow$ `SERVED`), Fast Toggle Stok |
+| 🤵 **WAITER**  | `waiter@menuscan.com`  | `waiter123`  | Layar Mobile Waiter (Antar `SERVED` & Reset Meja `VACANT`)                    |
+
+---
+
+### 2. Modul Public (Customer, QRIS & Tracking)
 
 - **Cek Status Meja & Riwayat Sesi**: `GET /api/v1/public/tables/:number/status`
 - **Inisialisasi Sesi**: `POST /api/v1/public/tables/:number/session` (`{ "customerName": "Dwi Gunardi" }`)
-- **Banners Promo**: `GET /api/v1/public/banners`
-- **Kategori Menu**: `GET /api/v1/public/categories`
-- **Katalog Menu**: `GET /api/v1/public/menus?categoryId=...`
-- **Detail Menu & Varian**: `GET /api/v1/public/menus/:id`
+- **Banners Promo**: `GET /api/v1/public/banners` _(Redis Cached)_
+- **Kategori Menu**: `GET /api/v1/public/categories` _(Redis Cached)_
+- **Katalog Menu**: `GET /api/v1/public/menus?categoryId=...` _(Redis Cached)_
+- **Detail Menu & Varian**: `GET /api/v1/public/menus/:id` _(Redis Cached)_
 - **Buat Pesanan Baru (Batch 1 / Batch 2)**: `POST /api/v1/public/orders`
+- **Generate QRIS Dinamis**: `POST /api/v1/public/payments/create-qris` (`{ "orderId": "order-uuid" }`)
+- **Payment Gateway Webhook Callback**: `POST /api/v1/public/payments/webhook`
 - **Live Tracking Pesanan**: `GET /api/v1/public/orders/:orderNumber`
 
 ---
 
 ### 3. Modul Auth & Staff Profile
 
-- **Login Staff**: `POST /api/v1/auth/login`
-- **Cek Profile**: `GET /api/v1/auth/me` (Header: `Authorization: Bearer <token>`)
+- **Key Exchange Handshake**: `POST /api/v1/auth/handshake`
+- **Staff Login**: `POST /api/v1/auth/login` (`{ "email": "admin@menuscan.com", "password": "admin123" }`)
+- **Refresh Token**: `POST /api/v1/auth/refresh`
+- **Staff Logout**: `POST /api/v1/auth/logout`
+- **Staff Profile Me**: `GET /api/v1/auth/me`
 
 ---
 
 ### 4. Modul Admin & Staff Operations (KDS, Floor Plan, Menu)
 
-*(Wajib Header: `Authorization: Bearer <accessToken>`)*
-
-#### 4.1. Kitchen Display System (KDS)
-- **List Pesanan Masuk Lunas**: `GET /api/v1/admin/orders?status=PAID&page=1&limit=20` *(Akses: ADMIN, KITCHEN, CASHIER, WAITER)*
-- **Update Status Masak / Saji**: `PATCH /api/v1/admin/orders/:id/status` (`{ "status": "PREPARING" | "SERVED" }`)
-
-#### 4.2. Floor Plan & 1-Tap Reset Meja
-- **List Semua Meja**: `GET /api/v1/admin/tables` *(Akses: ADMIN, CASHIER, WAITER)*
-- **Reset Meja Setelah Tamu Pulang & Dibersihkan**: `POST /api/v1/admin/tables/:id/reset` *(Akses: ADMIN, CASHIER, WAITER)*
-
-#### 4.3. Fast Toggle Stok Menu
-- **Fast Toggle Stok Habis (1-Click)**: `PATCH /api/v1/admin/menus/:id/status` (`{ "isAvailable": false }`)
+- **Live Orders Monitor (KDS / Kasir)**: `GET /api/v1/admin/orders?status=PAID`
+- **Update Status Pesanan**: `PATCH /api/v1/admin/orders/:id/status` (`{ "status": "PREPARING" | "SERVED" }`)
+- **Floor Plan Meja**: `GET /api/v1/admin/tables`
+- **1-Tap Reset Meja ke VACANT**: `POST /api/v1/admin/tables/:id/reset`
+- **Fast Toggle Ketersediaan Menu**: `PATCH /api/v1/admin/menus/:id/status` (`{ "isAvailable": false }`)
+- **Reordering Kategori**: `PATCH /api/v1/admin/categories/reorder`
 
 ---
 
 ### 5. Modul Executive Dashboard Overview & Financial Reports
 
-*(Akses Eksklusif: Role `ADMIN`)*
-
-- **Consolidated Dashboard Overview**: `GET /api/v1/admin/reports/dashboard-overview`
-- **Laporan Omset Berdasarkan Periode**: `GET /api/v1/admin/reports/revenue?startDate=2026-08-01&endDate=2026-08-10`
-- **Top Selling Products**: `GET /api/v1/admin/reports/top-selling?limit=5`
+- **Dashboard Overview (KPI, Recent Orders, Top Selling)**: `GET /api/v1/admin/reports/dashboard-overview`
+- **Laporan Pendapatan**: `GET /api/v1/admin/reports/revenue?startDate=2026-08-01&endDate=2026-08-31`
+- **Laporan Top Selling**: `GET /api/v1/admin/reports/top-selling?limit=5`
