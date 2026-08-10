@@ -52,7 +52,7 @@ describe('GlobalExceptionFilter', () => {
       {
         code: 'invalid_type',
         expected: 'string',
-        received: 'number',
+        input: 123,
         path: ['name'],
         message: 'Expected string, received number',
       },
