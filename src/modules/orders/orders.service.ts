@@ -267,6 +267,12 @@ export class OrdersService {
 
     if (dto.status === OrderStatus.PAID) {
       data.paidAt = new Date();
+      if (existing.tableId) {
+        await this.prisma.table.update({
+          where: { id: existing.tableId },
+          data: { status: 'WAITING_CLEANUP' as any },
+        });
+      }
     }
 
     const updated = await this.prisma.order.update({

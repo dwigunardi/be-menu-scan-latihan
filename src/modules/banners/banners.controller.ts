@@ -10,9 +10,11 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { BannersService } from './banners.service';
 import { CreateBannerDto, UpdateBannerDto } from './dto/banner.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Banners')
 @Controller()
@@ -36,6 +38,7 @@ export class BannersController {
   // -------------------------------------------------------------
 
   @Get('admin/banners')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'List all promo banners' })
   @ApiResponse({ status: 200, description: 'List of all banners' })
@@ -44,6 +47,7 @@ export class BannersController {
   }
 
   @Post('admin/banners')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create new promo banner' })
@@ -53,6 +57,7 @@ export class BannersController {
   }
 
   @Get('admin/banners/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get banner detail' })
   @ApiResponse({ status: 200, description: 'Banner detail' })
@@ -62,6 +67,7 @@ export class BannersController {
   }
 
   @Patch('admin/banners/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update promo banner' })
   @ApiResponse({ status: 200, description: 'Banner updated' })
@@ -71,6 +77,7 @@ export class BannersController {
   }
 
   @Delete('admin/banners/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Delete promo banner' })
   @ApiResponse({ status: 200, description: 'Banner deleted' })

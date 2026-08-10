@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { CategoriesService } from './categories.service';
 import {
   CreateCategoryDto,
@@ -17,6 +18,7 @@ import {
   ReorderCategoryDto,
 } from './dto/category.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Categories')
 @Controller()
@@ -40,6 +42,7 @@ export class CategoriesController {
   // -------------------------------------------------------------
 
   @Get('admin/categories')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'List all categories with total menu item counts' })
   @ApiResponse({ status: 200, description: 'List of all categories' })
@@ -48,6 +51,7 @@ export class CategoriesController {
   }
 
   @Post('admin/categories')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create new category' })
@@ -58,6 +62,7 @@ export class CategoriesController {
   }
 
   @Patch('admin/categories/reorder')
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Reorder categories sort order' })
@@ -67,6 +72,7 @@ export class CategoriesController {
   }
 
   @Get('admin/categories/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get category detail by ID' })
   @ApiResponse({ status: 200, description: 'Category detail' })
@@ -76,6 +82,7 @@ export class CategoriesController {
   }
 
   @Patch('admin/categories/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update category' })
   @ApiResponse({ status: 200, description: 'Category updated' })
@@ -88,6 +95,7 @@ export class CategoriesController {
   }
 
   @Delete('admin/categories/:id')
+  @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Soft delete category' })
   @ApiResponse({ status: 200, description: 'Category deleted' })

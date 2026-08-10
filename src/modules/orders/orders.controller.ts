@@ -10,6 +10,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { UserRole } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import {
   CreateOrderDto,
@@ -17,6 +18,7 @@ import {
   QueryOrderDto,
 } from './dto/order.dto';
 import { Public } from '../../common/decorators/public.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Orders')
 @Controller()
@@ -48,20 +50,22 @@ export class OrdersController {
   }
 
   // -------------------------------------------------------------
-  // Admin Endpoints (Kitchen / Cashier Live Orders)
+  // Admin & Staff Endpoints (Kitchen / Cashier / Waiter Live Orders)
   // -------------------------------------------------------------
 
   @Get('admin/orders')
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin monitor live orders list' })
+  @ApiOperation({ summary: 'Staff monitor live orders list' })
   @ApiResponse({ status: 200, description: 'List of live orders' })
   async getAdminOrders(@Query() query: QueryOrderDto) {
     return this.ordersService.findAllAdmin(query);
   }
 
   @Patch('admin/orders/:id/status')
+  @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Admin update order status (Kitchen / Cashier)' })
+  @ApiOperation({ summary: 'Staff update order status (Kitchen / Cashier / Waiter)' })
   @ApiResponse({ status: 200, description: 'Order status updated' })
   @ApiResponse({ status: 404, description: 'Order not found' })
   async updateOrderStatus(
