@@ -95,7 +95,7 @@ describe('OrdersService', () => {
         service.create({
           tableId: 'invalid-table',
           customerName: 'Budi',
-          items: [{ menuItemId: 'menu-123', quantity: 1 }],
+          items: [{ menuItemId: 'menu-123', quantity: 1, selectedVariants: [] }],
         }),
       ).rejects.toThrow(NotFoundException);
     });
@@ -110,7 +110,7 @@ describe('OrdersService', () => {
         service.create({
           tableId: 'table-123',
           customerName: 'Budi',
-          items: [{ menuItemId: 'menu-123', quantity: 1 }],
+          items: [{ menuItemId: 'menu-123', quantity: 1, selectedVariants: [] }],
         }),
       ).rejects.toThrow(BadRequestException);
     });
