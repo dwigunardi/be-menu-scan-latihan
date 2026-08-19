@@ -1,3 +1,4 @@
+import { createPaginatedResult } from '../../common/dto/pagination.dto';
 import {
   Injectable,
   NotFoundException,
@@ -257,15 +258,7 @@ export class OrdersService {
       }),
     ]);
 
-    return {
-      data,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return createPaginatedResult(data, total, page, limit);
   }
 
   /**
