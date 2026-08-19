@@ -6,10 +6,11 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CategoriesService } from './categories.service';
 import {
@@ -17,6 +18,7 @@ import {
   UpdateCategoryDto,
   ReorderCategoryDto,
 } from './dto/category.dto';
+import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 
@@ -25,29 +27,21 @@ import { Roles } from '../../common/decorators/roles.decorator';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
-  // -------------------------------------------------------------
-  // Public Customer Endpoints
-  // -------------------------------------------------------------
-
   @Public()
   @Get('public/categories')
-  @ApiOperation({ summary: 'Get all active categories for public customer menu' })
-  @ApiResponse({ status: 200, description: 'List of active categories' })
-  async getPublicCategories() {
-    return this.categoriesService.findAllPublic();
+  @ApiOperation({ summary: 'Get all active categories for public customer menu (supports limit: -1 for getAll)' })
+  @ApiResponse({ status: 200, description: 'Paginated active categories' })
+  async getPublicCategories(@Query() query: PaginationQueryDto) {
+    return this.categoriesService.findAllPublic(query);
   }
-
-  // -------------------------------------------------------------
-  // Admin Endpoints
-  // -------------------------------------------------------------
 
   @Get('admin/categories')
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'List all categories with total menu item counts' })
-  @ApiResponse({ status: 200, description: 'List of all categories' })
-  async getAdminCategories() {
-    return this.categoriesService.findAllAdmin();
+  @ApiOperation({ summary: 'List all categories with total menu item counts (supports pagination / getAll)' })
+  @ApiResponse({ status: 200, description: 'Paginated categories list' })
+  async getAdminCategories(@Query() query: PaginationQueryDto) {
+    return this.categoriesService.findAllAdmin(query);
   }
 
   @Post('admin/categories')

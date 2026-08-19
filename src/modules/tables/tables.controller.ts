@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import { TablesService } from './tables.service';
 import {
   CreateTableDto,
   TableSessionDto,
+  QueryTableDto,
   TableStatusResponseSchema,
 } from './dto/table.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -24,10 +26,6 @@ import { ZodResponse } from '../../common/decorators/zod-response.decorator';
 @Controller()
 export class TablesController {
   constructor(private readonly tablesService: TablesService) {}
-
-  // -------------------------------------------------------------
-  // Public Customer Endpoints (QR Scan)
-  // -------------------------------------------------------------
 
   @Public()
   @ZodResponse(TableStatusResponseSchema)
@@ -52,17 +50,13 @@ export class TablesController {
     return this.tablesService.initSession(tableNumber, dto);
   }
 
-  // -------------------------------------------------------------
-  // Admin & Staff Operations
-  // -------------------------------------------------------------
-
   @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.WAITER)
   @Get('admin/tables')
-  @ApiOperation({ summary: 'List all cafe tables with current occupancy' })
-  @ApiResponse({ status: 200, description: 'All tables returned' })
-  async findAllAdmin() {
-    return this.tablesService.findAllAdmin();
+  @ApiOperation({ summary: 'List cafe tables with current occupancy (paginated or limit: -1 for getAll)' })
+  @ApiResponse({ status: 200, description: 'Paginated tables returned' })
+  async findAllAdmin(@Query() query: QueryTableDto) {
+    return this.tablesService.findAllAdmin(query);
   }
 
   @ApiBearerAuth('JWT-auth')
