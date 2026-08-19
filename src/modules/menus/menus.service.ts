@@ -161,7 +161,7 @@ export class MenusService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { [query.sortBy || 'createdAt']: query.sortOrder || 'desc' },
         include: {
           category: true,
           variantGroups: {

@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { PaginationQuerySchema } from '../../../common/dto/pagination.dto';
 
 export const SelectedVariantInputSchema = z.object({
   groupName: z.string().min(1, 'groupName is required'),
@@ -30,13 +31,12 @@ export const UpdateOrderStatusSchema = z.object({
 
 export class UpdateOrderStatusDto extends createZodDto(UpdateOrderStatusSchema) {}
 
-export const QueryOrderSchema = z.object({
+export const QueryOrderSchema = PaginationQuerySchema.extend({
   status: z.enum(['PENDING', 'PREPARING', 'SERVED', 'PAID', 'CANCELLED']).optional(),
   tableId: z.string().uuid().optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
-  page: z.coerce.number().int().min(1).default(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20).optional(),
+  sortBy: z.enum(['createdAt', 'totalAmount', 'status']).default('createdAt').optional(),
 });
 
 export class QueryOrderDto extends createZodDto(QueryOrderSchema) {}

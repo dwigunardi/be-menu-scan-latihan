@@ -1,5 +1,6 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { PaginationQuerySchema } from '../../../common/dto/pagination.dto';
 
 export const CreateTableSchema = z.object({
   number: z.string().min(1, 'Table number is required (e.g. Meja 01)'),
@@ -12,6 +13,13 @@ export const TableSessionSchema = z.object({
 });
 
 export class TableSessionDto extends createZodDto(TableSessionSchema) {}
+
+export const QueryTableSchema = PaginationQuerySchema.extend({
+  status: z.enum(['VACANT', 'OCCUPIED', 'WAITING_PAYMENT', 'WAITING_CLEANUP']).optional(),
+  sortBy: z.enum(['number', 'status', 'createdAt']).default('number').optional(),
+});
+
+export class QueryTableDto extends createZodDto(QueryTableSchema) {}
 
 // Response Hardening Schemas
 export const TableActiveOrderItemSchema = z.object({

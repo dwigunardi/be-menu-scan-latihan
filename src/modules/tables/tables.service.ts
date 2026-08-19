@@ -5,9 +5,14 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
-import { CreateTableDto, TableSessionDto } from './dto/table.dto';
+import { CreateTableDto, TableSessionDto, QueryTableDto } from './dto/table.dto';
+import {
+  createPaginatedResult,
+  getPrismaPagination,
+} from '../../common/dto/pagination.dto';
 
 export const TableStatus = {
   VACANT: 'VACANT',
@@ -26,9 +31,6 @@ export class TablesService {
     @Optional() private readonly eventsGateway?: EventsGateway,
   ) {}
 
-  /**
-   * Public: Check table status, active customer, and persistent order history
-   */
   async getTableStatus(tableNumber: string) {
     const table = await this.prisma.table.findUnique({
       where: { number: tableNumber },
@@ -54,25 +56,27 @@ export class TablesService {
       throw new NotFoundException(`Table "${tableNumber}" not found`);
     }
 
+    const latestActiveOrder = table.orders[0] || null;
+
     return {
       tableId: table.id,
       number: table.number,
       status: table.status,
       activeCustomerName: table.activeCustomerName,
-      activeOrderId: table.orders[0]?.id || null,
-      activeOrderNumber: table.orders[0]?.orderNumber || null,
-      activeOrders: (table.orders || []).map((ord) => ({
-        id: ord.id,
-        orderNumber: ord.orderNumber,
-        status: ord.status,
-        totalAmount: Number(ord.totalAmount),
-        paidAt: ord.paidAt,
-        createdAt: ord.createdAt,
-        items: (ord.orderItems || []).map((item) => ({
+      activeOrderId: latestActiveOrder?.id || null,
+      activeOrderNumber: latestActiveOrder?.orderNumber || null,
+      activeOrders: table.orders.map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        status: o.status,
+        totalAmount: Number(o.totalAmount),
+        paidAt: o.paidAt,
+        createdAt: o.createdAt,
+        items: o.orderItems.map((item) => ({
           name: item.menuNameSnapshot,
           quantity: item.quantity,
           subtotal: Number(item.subtotal),
-          selectedVariants: (item.selectedVariants || []).map((v) => ({
+          selectedVariants: item.selectedVariants.map((v) => ({
             groupName: v.groupNameSnapshot,
             optionName: v.optionNameSnapshot,
           })),
@@ -81,9 +85,6 @@ export class TablesService {
     };
   }
 
-  /**
-   * Public: Initialize guest table session with customer name
-   */
   async initSession(tableNumber: string, dto: TableSessionDto) {
     const table = await this.prisma.table.findUnique({
       where: { number: tableNumber },
@@ -94,10 +95,10 @@ export class TablesService {
     }
 
     const updated = await this.prisma.table.update({
-      where: { number: tableNumber },
+      where: { id: table.id },
       data: {
-        status: TableStatus.OCCUPIED,
         activeCustomerName: dto.customerName,
+        status: TableStatus.OCCUPIED,
       },
     });
 
@@ -109,38 +110,57 @@ export class TablesService {
       step: 'TABLE_SESSION_INIT',
       tableNumber,
       customerName: dto.customerName,
-      msg: `Session initialized for table ${tableNumber} by ${dto.customerName}`,
+      msg: `Session created for table ${tableNumber} by ${dto.customerName}`,
     });
 
     return {
       tableId: updated.id,
       number: updated.number,
       status: updated.status,
-      customerName: updated.activeCustomerName,
+      activeCustomerName: updated.activeCustomerName,
     };
   }
 
-  /**
-   * Admin: Find all tables
-   */
-  async findAllAdmin() {
-    return this.prisma.table.findMany({
-      orderBy: { number: 'asc' },
-      include: {
-        orders: {
-          where: {
-            status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
+  async findAllAdmin(query: QueryTableDto = {}) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit !== undefined ? query.limit : -1;
+    const { skip, take } = getPrismaPagination(page, limit);
+
+    const where: Prisma.TableWhereInput = {};
+
+    if (query.status) {
+      where.status = query.status as any;
+    }
+
+    if (query.search) {
+      where.OR = [
+        { number: { contains: query.search, mode: 'insensitive' } },
+        { activeCustomerName: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, items] = await Promise.all([
+      this.prisma.table.count({ where }),
+      this.prisma.table.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { [query.sortBy || 'number']: query.sortOrder || 'asc' },
+        include: {
+          orders: {
+            where: {
+              status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
           },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
         },
-      },
-    });
+      }),
+    ]);
+
+    return createPaginatedResult(items, total, page, limit);
   }
 
-  /**
-   * Admin: Create new table
-   */
   async create(dto: CreateTableDto) {
     const existing = await this.prisma.table.findUnique({
       where: { number: dto.number },
@@ -171,9 +191,6 @@ export class TablesService {
     return table;
   }
 
-  /**
-   * Admin / Waiter: Reset table status to VACANT
-   */
   async resetTable(id: string) {
     const table = await this.prisma.table.findUnique({
       where: { id },
@@ -186,8 +203,8 @@ export class TablesService {
     const updated = await this.prisma.table.update({
       where: { id },
       data: {
-        status: TableStatus.VACANT,
         activeCustomerName: null,
+        status: TableStatus.VACANT,
       },
     });
 
@@ -197,28 +214,21 @@ export class TablesService {
 
     this.logger.log({
       step: 'TABLE_RESET',
-      tableId: id,
-      number: updated.number,
-      msg: `Table ${updated.number} reset to VACANT`,
+      tableId: table.id,
+      number: table.number,
+      msg: `Table ${table.number} reset to VACANT`,
     });
 
-    return {
-      success: true,
-      message: `Table ${updated.number} reset to VACANT successfully`,
-      table: updated,
-    };
+    return updated;
   }
 
-  /**
-   * Admin: Delete table
-   */
   async remove(id: string) {
     const table = await this.prisma.table.findUnique({
       where: { id },
       include: {
         orders: {
           where: {
-            status: { in: ['PENDING', 'PREPARING'] },
+            status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
           },
         },
       },
@@ -230,7 +240,7 @@ export class TablesService {
 
     if (table.orders.length > 0) {
       throw new ConflictException(
-        `Cannot delete table ${table.number} because it has active pending orders`,
+        `Cannot delete table ${table.number} while it has active orders`,
       );
     }
 
@@ -245,9 +255,6 @@ export class TablesService {
       msg: `Table ${table.number} deleted`,
     });
 
-    return {
-      success: true,
-      message: `Table ${table.number} deleted successfully`,
-    };
+    return { success: true, message: `Table ${table.number} deleted successfully` };
   }
 }

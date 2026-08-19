@@ -1,3 +1,4 @@
+import { PaginationQuerySchema } from '../../../common/dto/pagination.dto';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
@@ -53,9 +54,8 @@ export const ToggleMenuStatusSchema = z.object({
 
 export class ToggleMenuStatusDto extends createZodDto(ToggleMenuStatusSchema) {}
 
-export const QueryMenuSchema = z.object({
+export const QueryMenuSchema = PaginationQuerySchema.extend({
   categoryId: z.string().uuid().optional(),
-  search: z.string().optional(),
   isAvailable: z
     .enum(['true', 'false'])
     .transform((val) => val === 'true')
@@ -68,8 +68,10 @@ export const QueryMenuSchema = z.object({
     .enum(['true', 'false'])
     .transform((val) => val === 'true')
     .optional(),
-  page: z.coerce.number().int().min(1).default(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20).optional(),
+  sortBy: z
+    .enum(['name', 'price', 'rating', 'createdAt', 'isAvailable'])
+    .default('createdAt')
+    .optional(),
 });
 
 export class QueryMenuDto extends createZodDto(QueryMenuSchema) {}

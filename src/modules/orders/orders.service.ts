@@ -1,4 +1,4 @@
-import { createPaginatedResult } from '../../common/dto/pagination.dto';
+import { createPaginatedResult, getPrismaPagination } from '../../common/dto/pagination.dto';
 import {
   Injectable,
   NotFoundException,
@@ -213,10 +213,10 @@ export class OrdersService {
   /**
    * Admin / Staff: List orders with filters (Live KDS Monitor)
    */
-  async findAllAdmin(query: QueryOrderDto) {
+  async findAllAdmin(query: QueryOrderDto = {}) {
     const page = query.page && query.page > 0 ? query.page : 1;
-    const limit = query.limit && query.limit > 0 ? query.limit : 20;
-    const skip = (page - 1) * limit;
+    const limit = query.limit !== undefined ? query.limit : 20;
+    const { skip, take } = getPrismaPagination(page, limit);
 
     const where: Prisma.OrderWhereInput = {};
 
@@ -226,6 +226,13 @@ export class OrdersService {
 
     if (query.tableId) {
       where.tableId = query.tableId;
+    }
+
+    if (query.search) {
+      where.OR = [
+        { orderNumber: { contains: query.search, mode: 'insensitive' } },
+        { customerName: { contains: query.search, mode: 'insensitive' } },
+      ];
     }
 
     if (query.startDate || query.endDate) {
@@ -238,13 +245,13 @@ export class OrdersService {
       }
     }
 
-    const [total, data] = await Promise.all([
+    const [total, items] = await Promise.all([
       this.prisma.order.count({ where }),
       this.prisma.order.findMany({
         where,
         skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
+        take,
+        orderBy: { [query.sortBy || 'createdAt']: query.sortOrder || 'desc' },
         include: {
           table: {
             select: { id: true, number: true },
@@ -258,7 +265,7 @@ export class OrdersService {
       }),
     ]);
 
-    return createPaginatedResult(data, total, page, limit);
+    return createPaginatedResult(items, total, page, limit);
   }
 
   /**

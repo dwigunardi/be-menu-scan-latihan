@@ -5,6 +5,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import {
@@ -12,6 +13,11 @@ import {
   UpdateCategoryDto,
   ReorderCategoryDto,
 } from './dto/category.dto';
+import {
+  PaginationQueryDto,
+  createPaginatedResult,
+  getPrismaPagination,
+} from '../../common/dto/pagination.dto';
 
 function slugify(text: string): string {
   return text
@@ -34,69 +40,92 @@ export class CategoriesService {
   ) {}
 
   /**
-   * Public: List all active categories with available item counts (Redis Cached)
+   * Public: List active categories with pagination (limit: -1 for getAll)
    */
-  async findAllPublic() {
-    if (this.redisService) {
-      const cached = await this.redisService.get<any[]>(this.CACHE_KEY);
-      if (cached) {
-        return cached;
-      }
+  async findAllPublic(query: PaginationQueryDto = {}) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit !== undefined ? query.limit : -1;
+    const { skip, take } = getPrismaPagination(page, limit);
+
+    const where: Prisma.CategoryWhereInput = {
+      deletedAt: null,
+    };
+
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { slug: { contains: query.search, mode: 'insensitive' } },
+      ];
     }
 
-    const categories = await this.prisma.category.findMany({
-      where: {
-        deletedAt: null,
-      },
-      orderBy: {
-        sortOrder: 'asc',
-      },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        sortOrder: true,
-        _count: {
-          select: {
-            menuItems: {
-              where: {
-                isAvailable: true,
-                deletedAt: null,
+    const [total, items] = await Promise.all([
+      this.prisma.category.count({ where }),
+      this.prisma.category.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { [query.sortBy || 'sortOrder']: query.sortOrder || 'asc' },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          sortOrder: true,
+          _count: {
+            select: {
+              menuItems: {
+                where: {
+                  isAvailable: true,
+                  deletedAt: null,
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    if (this.redisService) {
-      await this.redisService.set(this.CACHE_KEY, categories, 300); // 5 mins TTL
-    }
-
-    return categories;
+    return createPaginatedResult(items, total, page, limit);
   }
 
   /**
-   * Admin: List all categories (including item total counts)
+   * Admin: List all categories with pagination (limit: -1 for getAll)
    */
-  async findAllAdmin() {
-    return this.prisma.category.findMany({
-      where: {
-        deletedAt: null,
-      },
-      orderBy: {
-        sortOrder: 'asc',
-      },
-      include: {
-        _count: {
-          select: {
-            menuItems: {
-              where: { deletedAt: null },
+  async findAllAdmin(query: PaginationQueryDto = {}) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit !== undefined ? query.limit : -1;
+    const { skip, take } = getPrismaPagination(page, limit);
+
+    const where: Prisma.CategoryWhereInput = {
+      deletedAt: null,
+    };
+
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { slug: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [total, items] = await Promise.all([
+      this.prisma.category.count({ where }),
+      this.prisma.category.findMany({
+        where,
+        skip,
+        take,
+        orderBy: { [query.sortBy || 'sortOrder']: query.sortOrder || 'asc' },
+        include: {
+          _count: {
+            select: {
+              menuItems: {
+                where: { deletedAt: null },
+              },
             },
           },
         },
-      },
-    });
+      }),
+    ]);
+
+    return createPaginatedResult(items, total, page, limit);
   }
 
   /**
