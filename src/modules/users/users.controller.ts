@@ -18,7 +18,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
-@Roles(UserRole.ADMIN, UserRole.SUPERADMIN)
+@Roles(UserRole.ADMIN)
 @Controller('admin/users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
