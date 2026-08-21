@@ -8,7 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
-import { CreateTableDto, TableSessionDto, QueryTableDto } from './dto/table.dto';
+import { CreateTableDto, UpdateTableDto, TableSessionDto, QueryTableDto } from './dto/table.dto';
 import {
   createPaginatedResult,
   getPrismaPagination,
@@ -162,17 +162,23 @@ export class TablesService {
   }
 
   async create(dto: CreateTableDto) {
+    const tableNumber = dto.number || dto.tableNumber || '';
+    if (!tableNumber) {
+      throw new ConflictException('Table number is required');
+    }
+
     const existing = await this.prisma.table.findUnique({
-      where: { number: dto.number },
+      where: { number: tableNumber },
     });
 
     if (existing) {
-      throw new ConflictException(`Table "${dto.number}" already exists`);
+      throw new ConflictException(`Table "${tableNumber}" already exists`);
     }
 
     const table = await this.prisma.table.create({
       data: {
-        number: dto.number,
+        number: tableNumber,
+        capacity: dto.capacity !== undefined ? Number(dto.capacity) : 4,
         status: TableStatus.VACANT,
       },
     });
@@ -217,6 +223,50 @@ export class TablesService {
       tableId: table.id,
       number: table.number,
       msg: `Table ${table.number} reset to VACANT`,
+    });
+
+    return updated;
+  }
+
+  
+    async update(id: string, dto: UpdateTableDto) {
+    const table = await this.prisma.table.findUnique({
+      where: { id },
+    });
+
+    if (!table) {
+      throw new NotFoundException(`Table with ID ${id} not found`);
+    }
+
+    const newNumber = dto.number || dto.tableNumber;
+
+    if (newNumber && newNumber !== table.number) {
+      const existing = await this.prisma.table.findUnique({
+        where: { number: newNumber },
+      });
+      if (existing && existing.id !== id) {
+        throw new ConflictException(`Table "${newNumber}" already exists`);
+      }
+    }
+
+    const updated = await this.prisma.table.update({
+      where: { id },
+      data: {
+        ...(newNumber ? { number: newNumber } : {}),
+        ...(dto.capacity !== undefined ? { capacity: Number(dto.capacity) } : {}),
+        ...(dto.status ? { status: dto.status as any } : {}),
+      },
+    });
+
+    if (this.eventsGateway) {
+      this.eventsGateway.emitTableStatusChanged(updated);
+    }
+
+    this.logger.log({
+      step: 'TABLE_UPDATE',
+      tableId: id,
+      number: updated.number,
+      msg: `Table ${updated.number} updated`,
     });
 
     return updated;

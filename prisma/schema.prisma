@@ -141,6 +141,7 @@ model PromoBanner {
 model Table {
   id                 String      @id @default(uuid())
   number             String      @unique // Meja 01, Meja 02, VIP-1
+  capacity           Int         @default(4)
   status             TableStatus @default(VACANT)
   activeCustomerName String?     @map("active_customer_name")
   orders             Order[]
