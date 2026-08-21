@@ -4,9 +4,20 @@ import { PaginationQuerySchema } from '../../../common/dto/pagination.dto';
 
 export const CreateTableSchema = z.object({
   number: z.string().min(1, 'Table number is required (e.g. Meja 01)'),
+  tableNumber: z.string().optional(),
+  capacity: z.number().int().min(1).default(4).optional(),
 });
 
 export class CreateTableDto extends createZodDto(CreateTableSchema) {}
+
+export const UpdateTableSchema = z.object({
+  number: z.string().min(1, 'Table number is required').optional(),
+  tableNumber: z.string().optional(),
+  status: z.enum(['VACANT', 'OCCUPIED', 'WAITING_PAYMENT', 'WAITING_CLEANUP']).optional(),
+  capacity: z.number().int().min(1).optional(),
+});
+
+export class UpdateTableDto extends createZodDto(UpdateTableSchema) {}
 
 export const TableSessionSchema = z.object({
   customerName: z.string().min(2, 'Customer name must be at least 2 characters'),

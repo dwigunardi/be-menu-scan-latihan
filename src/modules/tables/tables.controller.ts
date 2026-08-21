@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -14,6 +15,7 @@ import { UserRole } from '@prisma/client';
 import { TablesService } from './tables.service';
 import {
   CreateTableDto,
+  UpdateTableDto,
   TableSessionDto,
   QueryTableDto,
   TableStatusResponseSchema,
@@ -82,6 +84,18 @@ export class TablesController {
 
   @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.ADMIN)
+  @Patch('admin/tables/:id')
+  @ApiOperation({ summary: 'Update table number or status' })
+  @ApiResponse({ status: 200, description: 'Table updated' })
+  @ApiResponse({ status: 404, description: 'Table not found' })
+  @ApiResponse({ status: 409, description: 'Table number already exists' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTableDto,
+  ) {
+    return this.tablesService.update(id, dto);
+  }
+
   @Delete('admin/tables/:id')
   @ApiOperation({ summary: 'Delete table' })
   @ApiResponse({ status: 200, description: 'Table deleted' })
