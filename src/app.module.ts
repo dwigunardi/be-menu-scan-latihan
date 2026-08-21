@@ -10,16 +10,10 @@ import { DecryptPayloadMiddleware } from './common/middlewares/decrypt-payload.m
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
-// Domain Feature Modules
+// Core Feature Modules
 import { AuthModule } from './modules/auth/auth.module';
-import { CategoriesModule } from './modules/categories/categories.module';
-import { BannersModule } from './modules/banners/banners.module';
-import { MenusModule } from './modules/menus/menus.module';
-import { TablesModule } from './modules/tables/tables.module';
-import { OrdersModule } from './modules/orders/orders.module';
-import { ReportsModule } from './modules/reports/reports.module';
+import { UsersModule } from './modules/users/users.module';
 import { EventsModule } from './modules/events/events.module';
-import { PaymentsModule } from './modules/payments/payments.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -36,13 +30,7 @@ import { AppService } from './app.service';
     RedisModule,
     EventsModule,
     AuthModule,
-    CategoriesModule,
-    BannersModule,
-    MenusModule,
-    TablesModule,
-    OrdersModule,
-    ReportsModule,
-    PaymentsModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
