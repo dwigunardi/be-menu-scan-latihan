@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as express from 'express';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -20,9 +23,25 @@ async function bootstrap() {
   const port = configService.get<number>('app.PORT') || 3000;
   const frontendUrl = configService.get<string>('app.FRONTEND_URL') || 'http://localhost:3000';
 
+  // Serve static uploaded assets securely with nosniff header
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  app.use(
+    '/uploads',
+    express.static(uploadsDir, {
+      maxAge: '7d',
+      setHeaders: (res) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      },
+    }),
+  );
+
   // Global Prefix
   app.setGlobalPrefix('api/v1', {
-    exclude: ['api/docs', 'health'],
+    exclude: ['api/docs', 'health', 'uploads/(.*)'],
   });
 
   // Enable CORS
