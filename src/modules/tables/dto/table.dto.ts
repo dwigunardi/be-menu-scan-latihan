@@ -6,6 +6,9 @@ export const CreateTableSchema = z.object({
   number: z.string().min(1, 'Table number is required (e.g. Meja 01)'),
   tableNumber: z.string().optional(),
   capacity: z.number().int().min(1).default(4).optional(),
+  zoneId: z.string().nullable().optional(),
+  seatingType: z.enum(['DINING', 'SOFA', 'BAR', 'BOOTH', 'FAMILY']).default('DINING').optional(),
+  tags: z.array(z.string()).default([]).optional(),
 });
 
 export class CreateTableDto extends createZodDto(CreateTableSchema) {}
@@ -15,6 +18,9 @@ export const UpdateTableSchema = z.object({
   tableNumber: z.string().optional(),
   status: z.enum(['VACANT', 'OCCUPIED', 'WAITING_PAYMENT', 'WAITING_CLEANUP']).optional(),
   capacity: z.number().int().min(1).optional(),
+  zoneId: z.string().nullable().optional(),
+  seatingType: z.enum(['DINING', 'SOFA', 'BAR', 'BOOTH', 'FAMILY']).optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 export class UpdateTableDto extends createZodDto(UpdateTableSchema) {}
@@ -27,6 +33,8 @@ export class TableSessionDto extends createZodDto(TableSessionSchema) {}
 
 export const QueryTableSchema = PaginationQuerySchema.extend({
   status: z.enum(['VACANT', 'OCCUPIED', 'WAITING_PAYMENT', 'WAITING_CLEANUP']).optional(),
+  zoneId: z.string().optional(),
+  seatingType: z.string().optional(),
   sortBy: z.enum(['number', 'status', 'createdAt']).default('number').optional(),
 });
 

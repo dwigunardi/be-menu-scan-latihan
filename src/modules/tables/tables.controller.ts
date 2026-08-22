@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -84,6 +85,7 @@ export class TablesController {
 
   @ApiBearerAuth('JWT-auth')
   @Roles(UserRole.ADMIN)
+  @Put('admin/tables/:id')
   @Patch('admin/tables/:id')
   @ApiOperation({ summary: 'Update table number or status' })
   @ApiResponse({ status: 200, description: 'Table updated' })

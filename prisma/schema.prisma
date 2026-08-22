@@ -137,18 +137,37 @@ model PromoBanner {
   @@map("promo_banners")
 }
 
-/// Restaurant Table Model for QR Code Binding & Table Status Management
+/// Restaurant Table Zone Model for Floor Plan Grouping (e.g. "Indoor (AC Non-Smoking)", "Outdoor Garden", "VIP Lounge")
+model TableZone {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  color       String?  @default("amber")
+  sortOrder   Int      @default(0) @map("sort_order")
+  tables      Table[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("table_zones")
+}
+
+/// Restaurant Table Model for QR Code Binding, Seating Types & Table Status Management
 model Table {
   id                 String      @id @default(uuid())
   number             String      @unique // Meja 01, Meja 02, VIP-1
   capacity           Int         @default(4)
   status             TableStatus @default(VACANT)
+  zoneId             String?     @map("zone_id")
+  zone               TableZone?  @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  seatingType        String      @default("DINING") @map("seating_type") // DINING, SOFA, BAR, BOOTH, FAMILY
+  tags               String[]    @default([]) // ["OUTLET", "WINDOW_VIEW", "SMOKING", "AC"]
   activeCustomerName String?     @map("active_customer_name")
   orders             Order[]
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
 
   @@index([status])
+  @@index([zoneId])
   @@map("tables")
 }
 

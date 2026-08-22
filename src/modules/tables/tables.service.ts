@@ -5,7 +5,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CreateTableDto, UpdateTableDto, TableSessionDto, QueryTableDto } from './dto/table.dto';
@@ -14,13 +14,7 @@ import {
   getPrismaPagination,
 } from '../../common/dto/pagination.dto';
 
-export const TableStatus = {
-  VACANT: 'VACANT',
-  OCCUPIED: 'OCCUPIED',
-  WAITING_PAYMENT: 'WAITING_PAYMENT',
-  WAITING_CLEANUP: 'WAITING_CLEANUP',
-} as const;
-export type TableStatus = (typeof TableStatus)[keyof typeof TableStatus];
+export { TableStatus };
 
 @Injectable()
 export class TablesService {
@@ -35,6 +29,7 @@ export class TablesService {
     const table = await this.prisma.table.findUnique({
       where: { number: tableNumber },
       include: {
+        zone: true,
         orders: {
           where: {
             status: { in: ['PENDING', 'PREPARING', 'SERVED', 'PAID'] },
@@ -100,6 +95,9 @@ export class TablesService {
         activeCustomerName: dto.customerName,
         status: TableStatus.OCCUPIED,
       },
+      include: {
+        zone: true,
+      },
     });
 
     if (this.eventsGateway) {
@@ -129,7 +127,15 @@ export class TablesService {
     const where: Prisma.TableWhereInput = {};
 
     if (query.status) {
-      where.status = query.status as any;
+      where.status = query.status as TableStatus;
+    }
+
+    if (query.zoneId) {
+      where.zoneId = query.zoneId;
+    }
+
+    if (query.seatingType) {
+      where.seatingType = query.seatingType;
     }
 
     if (query.search) {
@@ -147,6 +153,7 @@ export class TablesService {
         take,
         orderBy: { [query.sortBy || 'number']: query.sortOrder || 'asc' },
         include: {
+          zone: true,
           orders: {
             where: {
               status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
@@ -180,6 +187,12 @@ export class TablesService {
         number: tableNumber,
         capacity: dto.capacity !== undefined ? Number(dto.capacity) : 4,
         status: TableStatus.VACANT,
+        ...(dto.zoneId !== undefined ? { zoneId: dto.zoneId } : {}),
+        ...(dto.seatingType ? { seatingType: dto.seatingType } : {}),
+        ...(dto.tags ? { tags: dto.tags } : {}),
+      },
+      include: {
+        zone: true,
       },
     });
 
@@ -200,6 +213,9 @@ export class TablesService {
   async resetTable(id: string) {
     const table = await this.prisma.table.findUnique({
       where: { id },
+      include: {
+        zone: true,
+      },
     });
 
     if (!table) {
@@ -211,6 +227,9 @@ export class TablesService {
       data: {
         activeCustomerName: null,
         status: TableStatus.VACANT,
+      },
+      include: {
+        zone: true,
       },
     });
 
@@ -228,8 +247,7 @@ export class TablesService {
     return updated;
   }
 
-  
-    async update(id: string, dto: UpdateTableDto) {
+  async update(id: string, dto: UpdateTableDto) {
     const table = await this.prisma.table.findUnique({
       where: { id },
     });
@@ -254,7 +272,13 @@ export class TablesService {
       data: {
         ...(newNumber ? { number: newNumber } : {}),
         ...(dto.capacity !== undefined ? { capacity: Number(dto.capacity) } : {}),
-        ...(dto.status ? { status: dto.status as any } : {}),
+        ...(dto.status ? { status: dto.status as TableStatus } : {}),
+        ...(dto.zoneId !== undefined ? { zoneId: dto.zoneId } : {}),
+        ...(dto.seatingType ? { seatingType: dto.seatingType } : {}),
+        ...(dto.tags ? { tags: dto.tags } : {}),
+      },
+      include: {
+        zone: true,
       },
     });
 

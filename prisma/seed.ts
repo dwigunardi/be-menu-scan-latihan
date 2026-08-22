@@ -58,32 +58,86 @@ async function main() {
   }
 
   // -------------------------------------------------------------
-  // 2. Seed Cafe Tables (Meja 01 s/d Meja 10)
+  // 2. Seed Table Zones & Cafe Tables
   // -------------------------------------------------------------
-  const tableNumbers = [
-    'Meja 01',
-    'Meja 02',
-    'Meja 03',
-    'Meja 04',
-    'Meja 05',
-    'Meja 06',
-    'Meja 07',
-    'Meja 08',
-    'Meja 09',
-    'Meja 10',
+  const indoorZone = await prisma.tableZone.upsert({
+    where: { name: 'Indoor (AC Non-Smoking)' },
+    update: {
+      description: 'Area berpendingin ruangan bebas asap rokok, cocok untuk kerja dan makan santai.',
+      color: 'blue',
+      sortOrder: 1,
+    },
+    create: {
+      name: 'Indoor (AC Non-Smoking)',
+      description: 'Area berpendingin ruangan bebas asap rokok, cocok untuk kerja dan makan santai.',
+      color: 'blue',
+      sortOrder: 1,
+    },
+  });
+
+  const outdoorZone = await prisma.tableZone.upsert({
+    where: { name: 'Outdoor (Garden Smoking)' },
+    update: {
+      description: 'Area terbuka dengan tanaman asri, diperbolehkan merokok.',
+      color: 'emerald',
+      sortOrder: 2,
+    },
+    create: {
+      name: 'Outdoor (Garden Smoking)',
+      description: 'Area terbuka dengan tanaman asri, diperbolehkan merokok.',
+      color: 'emerald',
+      sortOrder: 2,
+    },
+  });
+
+  const vipZone = await prisma.tableZone.upsert({
+    where: { name: 'VIP Lounge / Meeting' },
+    update: {
+      description: 'Ruang privat eksklusif dengan fasilitas rapat dan sofa santai keluarga.',
+      color: 'amber',
+      sortOrder: 3,
+    },
+    create: {
+      name: 'VIP Lounge / Meeting',
+      description: 'Ruang privat eksklusif dengan fasilitas rapat dan sofa santai keluarga.',
+      color: 'amber',
+      sortOrder: 3,
+    },
+  });
+
+  const tablesSeedData = [
+    { number: 'Meja 01', capacity: 4, zoneId: indoorZone.id, seatingType: 'DINING', tags: ['OUTLET'] },
+    { number: 'Meja 02', capacity: 4, zoneId: indoorZone.id, seatingType: 'SOFA', tags: ['OUTLET', 'WINDOW_VIEW'] },
+    { number: 'Meja 03', capacity: 2, zoneId: indoorZone.id, seatingType: 'DINING', tags: ['AC'] },
+    { number: 'Meja 04', capacity: 6, zoneId: indoorZone.id, seatingType: 'BOOTH', tags: ['OUTLET', 'AC'] },
+    { number: 'Meja 05', capacity: 2, zoneId: outdoorZone.id, seatingType: 'BAR', tags: ['SMOKING'] },
+    { number: 'Meja 06', capacity: 4, zoneId: outdoorZone.id, seatingType: 'BOOTH', tags: ['SMOKING', 'WINDOW_VIEW'] },
+    { number: 'Meja 07', capacity: 4, zoneId: outdoorZone.id, seatingType: 'DINING', tags: ['SMOKING'] },
+    { number: 'Meja 08', capacity: 4, zoneId: outdoorZone.id, seatingType: 'DINING', tags: ['SMOKING', 'OUTLET'] },
+    { number: 'Meja 09', capacity: 8, zoneId: vipZone.id, seatingType: 'FAMILY', tags: ['OUTLET', 'AC', 'WHEELCHAIR'] },
+    { number: 'Meja 10', capacity: 10, zoneId: vipZone.id, seatingType: 'SOFA', tags: ['OUTLET', 'AC', 'WINDOW_VIEW'] },
   ];
 
-  for (const number of tableNumbers) {
+  for (const t of tablesSeedData) {
     await prisma.table.upsert({
-      where: { number },
-      update: {},
+      where: { number: t.number },
+      update: {
+        capacity: t.capacity,
+        zoneId: t.zoneId,
+        seatingType: t.seatingType,
+        tags: t.tags,
+      },
       create: {
-        number,
+        number: t.number,
+        capacity: t.capacity,
         status: TableStatus.VACANT,
+        zoneId: t.zoneId,
+        seatingType: t.seatingType,
+        tags: t.tags,
       },
     });
   }
-  console.log(`✅ ${tableNumbers.length} Tables seeded (Meja 01 s/d Meja 10).`);
+  console.log(`✅ 3 Zones and ${tablesSeedData.length} enriched Tables seeded.`);
 
   // -------------------------------------------------------------
   // 3. Seed Promotional Banners

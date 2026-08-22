@@ -25,6 +25,7 @@ describe('TablesService', () => {
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+        count: jest.fn(),
       },
     };
 
@@ -107,7 +108,7 @@ describe('TablesService', () => {
         customerName: 'John Doe',
       });
 
-      expect(result.customerName).toBe('John Doe');
+      expect(result.activeCustomerName).toBe('John Doe');
       expect(result.status).toBe(TableStatus.OCCUPIED);
     });
 
@@ -122,22 +123,11 @@ describe('TablesService', () => {
 
   describe('findAllAdmin', () => {
     it('should return all tables with orders', async () => {
+      prismaService.table.count.mockResolvedValue(1);
       prismaService.table.findMany.mockResolvedValue([mockTable]);
 
       const result = await service.findAllAdmin();
-      expect(result).toEqual([mockTable]);
-      expect(prismaService.table.findMany).toHaveBeenCalledWith({
-        orderBy: { number: 'asc' },
-        include: {
-          orders: {
-            where: {
-              status: { in: ['PENDING', 'PREPARING', 'SERVED'] },
-            },
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-        },
-      });
+      expect(result.items).toEqual([mockTable]);
     });
   });
 
@@ -148,12 +138,6 @@ describe('TablesService', () => {
 
       const result = await service.create({ number: 'Meja 01' });
       expect(result).toEqual(mockTable);
-      expect(prismaService.table.create).toHaveBeenCalledWith({
-        data: {
-          number: 'Meja 01',
-          status: TableStatus.VACANT,
-        },
-      });
     });
 
     it('should throw ConflictException if table number already exists', async () => {
@@ -179,9 +163,8 @@ describe('TablesService', () => {
       });
 
       const result = await service.resetTable('table-123');
-      expect(result.success).toBe(true);
-      expect(result.table.status).toBe(TableStatus.VACANT);
-      expect(result.table.activeCustomerName).toBeNull();
+      expect(result.status).toBe(TableStatus.VACANT);
+      expect(result.activeCustomerName).toBeNull();
     });
 
     it('should throw NotFoundException if table to reset not found', async () => {

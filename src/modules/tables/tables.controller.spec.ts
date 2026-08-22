@@ -59,7 +59,7 @@ describe('TablesController', () => {
       const tables = [{ id: 't1', number: '01', status: 'VACANT' }];
       tablesService.findAllAdmin.mockResolvedValue(tables as any);
 
-      const result = await controller.findAllAdmin();
+      const result = await controller.findAllAdmin({});
       expect(result).toEqual(tables);
       expect(tablesService.findAllAdmin).toHaveBeenCalled();
     });
