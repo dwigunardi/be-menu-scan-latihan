@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -88,6 +89,7 @@ export class MenusController {
     return this.menusService.findOnePublic(id);
   }
 
+  @Put('admin/menus/:id')
   @Patch('admin/menus/:id')
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')
@@ -101,6 +103,7 @@ export class MenusController {
     return this.menusService.update(id, dto);
   }
 
+  @Put('admin/menus/:id/status')
   @Patch('admin/menus/:id/status')
   @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER)
   @ApiBearerAuth('JWT-auth')

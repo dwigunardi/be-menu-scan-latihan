@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -55,6 +56,7 @@ export class CategoriesController {
     return this.categoriesService.create(dto);
   }
 
+  @Put('admin/categories/reorder')
   @Patch('admin/categories/reorder')
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -75,6 +77,7 @@ export class CategoriesController {
     return this.categoriesService.findOne(id);
   }
 
+  @Put('admin/categories/:id')
   @Patch('admin/categories/:id')
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')

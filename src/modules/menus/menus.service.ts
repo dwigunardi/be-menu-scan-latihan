@@ -349,6 +349,14 @@ export class MenusService {
     const updated = await this.prisma.menuItem.update({
       where: { id },
       data: { isAvailable: dto.isAvailable },
+      include: {
+        category: true,
+        variantGroups: {
+          include: {
+            options: true,
+          },
+        },
+      },
     });
 
     this.invalidateCache();
@@ -360,11 +368,7 @@ export class MenusService {
       msg: `Menu ${id} availability changed to ${dto.isAvailable}`,
     });
 
-    return {
-      success: true,
-      message: `Menu availability updated to ${dto.isAvailable ? 'AVAILABLE' : 'OUT_OF_STOCK'}`,
-      item: updated,
-    };
+    return updated;
   }
 
   /**

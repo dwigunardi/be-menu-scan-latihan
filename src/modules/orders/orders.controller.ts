@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Body,
   Param,
   Query,
@@ -62,6 +63,7 @@ export class OrdersController {
     return this.ordersService.findAllAdmin(query);
   }
 
+  @Put('admin/orders/:id/status')
   @Patch('admin/orders/:id/status')
   @Roles(UserRole.ADMIN, UserRole.KITCHEN, UserRole.CASHIER, UserRole.WAITER)
   @ApiBearerAuth('JWT-auth')

@@ -151,8 +151,7 @@ export class OrdersService {
             })),
           },
         },
-        include: {
-          table: true,
+        include: { table: { include: { zone: true } },
           orderItems: {
             include: {
               selectedVariants: true,
@@ -297,8 +296,7 @@ export class OrdersService {
     const updated = await this.prisma.order.update({
       where: { id },
       data,
-      include: {
-        table: true,
+      include: { table: { include: { zone: true } },
         orderItems: {
           include: {
             selectedVariants: true,

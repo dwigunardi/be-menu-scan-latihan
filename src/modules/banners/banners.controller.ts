@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Body,
   Param,
@@ -66,6 +67,7 @@ export class BannersController {
     return this.bannersService.findOne(id);
   }
 
+  @Put('admin/banners/:id')
   @Patch('admin/banners/:id')
   @Roles(UserRole.ADMIN)
   @ApiBearerAuth('JWT-auth')

@@ -29,6 +29,14 @@ async function bootstrap() {
   app.enableCors({
     origin: [frontendUrl, 'http://localhost:3000', 'http://localhost:3001'],
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'x-handshake-token',
+      'X-Requested-With',
+    ],
   });
 
   // Global Zod Validation Pipe
