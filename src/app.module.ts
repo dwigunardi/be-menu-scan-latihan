@@ -44,6 +44,7 @@ import { AppService } from './app.service';
     OrdersModule,
     ReportsModule,
     PaymentsModule,
+    UploadsModule,
   ],
   controllers: [AppController],
   providers: [
