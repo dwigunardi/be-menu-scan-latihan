@@ -21,6 +21,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { EventsModule } from './modules/events/events.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { StaffModule } from './modules/staff/staff.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -45,6 +46,7 @@ import { AppService } from './app.service';
     ReportsModule,
     PaymentsModule,
     UploadsModule,
+    StaffModule,
   ],
   controllers: [AppController],
   providers: [
