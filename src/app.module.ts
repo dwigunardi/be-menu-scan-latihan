@@ -22,6 +22,7 @@ import { EventsModule } from './modules/events/events.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { SettingsModule } from './modules/settings/settings.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -47,6 +48,7 @@ import { AppService } from './app.service';
     PaymentsModule,
     UploadsModule,
     StaffModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [

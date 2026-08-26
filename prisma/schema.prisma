@@ -234,3 +234,28 @@ model OrderItemVariant {
   @@index([orderItemId])
   @@map("order_item_variants")
 }
+
+
+/// Cafe Branch & Geofence Operational Settings Model
+model BranchSetting {
+  id                 String   @id @default(uuid())
+  name               String   @default("Kumpul Cafe - Cabang Pusat")
+  address            String   @default("Jl. Tebet Raya No. 45, Jakarta Selatan")
+  latitude           Float    @default(-6.2297465)
+  longitude          Float    @default(106.8557342)
+  geofenceRadius     Int      @default(100) @map("geofence_radius") // in meters
+  openTime           String   @default("08:00") @map("open_time")
+  closeTime          String   @default("22:00") @map("close_time")
+  lateGracePeriod    Int      @default(15) @map("late_grace_period") // in minutes
+  isStoreOpen        Boolean  @default(false) @map("is_store_open")
+  storeMode          String   @default("SHIFT_DRIVEN") @map("store_mode") // SHIFT_DRIVEN | CLOCK_DRIVEN | QRIS_ONLY | EMERGENCY_CLOSED
+  emergencyReason    String?  @map("emergency_reason")
+  timezone           String   @default("Asia/Jakarta")
+  phone              String?
+  email              String?
+  schedules          Json?    // Weekly day-by-day open/close schedule
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("branch_settings")
+}
