@@ -18,7 +18,7 @@ export class UpdateCategoryDto extends createZodDto(UpdateCategorySchema) {}
 export const ReorderCategorySchema = z.object({
   items: z.array(
     z.object({
-      id: z.string().uuid(),
+      id: z.uuid(),
       sortOrder: z.coerce.number().int(),
     }),
   ).min(1, 'At least 1 item is required for reordering'),

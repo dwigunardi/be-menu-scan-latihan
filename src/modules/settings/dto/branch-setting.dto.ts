@@ -20,7 +20,7 @@ export const UpdateBranchSettingSchema = z.object({
   storeMode: z.enum(['SHIFT_DRIVEN', 'CLOCK_DRIVEN', 'QRIS_ONLY', 'EMERGENCY_CLOSED']).optional(),
   timezone: z.string().default('Asia/Jakarta').optional(),
   phone: z.string().optional().nullable(),
-  email: z.string().email('Format email tidak valid').optional().nullable(),
+  email: z.email('Format email tidak valid').optional().nullable(),
   schedules: z.array(DayScheduleSchema).optional().nullable(),
 });
 

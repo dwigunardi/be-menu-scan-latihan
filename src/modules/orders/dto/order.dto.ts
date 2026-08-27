@@ -9,14 +9,14 @@ export const SelectedVariantInputSchema = z.object({
 });
 
 export const OrderItemInputSchema = z.object({
-  menuItemId: z.string().uuid('Invalid menuItemId'),
+  menuItemId: z.uuid('Invalid menuItemId'),
   quantity: z.coerce.number().int().min(1, 'Quantity must be at least 1'),
   notes: z.string().optional().nullable(),
   selectedVariants: z.array(SelectedVariantInputSchema).optional().default([]),
 });
 
 export const CreateOrderSchema = z.object({
-  tableId: z.string().uuid('Invalid tableId'),
+  tableId: z.uuid('Invalid tableId'),
   customerName: z.string().min(2, 'Customer name must be at least 2 characters'),
   items: z
     .array(OrderItemInputSchema)
@@ -33,9 +33,9 @@ export class UpdateOrderStatusDto extends createZodDto(UpdateOrderStatusSchema) 
 
 export const QueryOrderSchema = PaginationQuerySchema.extend({
   status: z.enum(['PENDING', 'PREPARING', 'SERVED', 'PAID', 'CANCELLED']).optional(),
-  tableId: z.string().uuid().optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  tableId: z.uuid().optional(),
+  startDate: z.iso.datetime().optional(),
+  endDate: z.iso.datetime().optional(),
   sortBy: z.enum(['createdAt', 'totalAmount', 'status']).default('createdAt').optional(),
 });
 

@@ -4,7 +4,7 @@ import { UserRole } from '@prisma/client';
 
 export const CreateStaffSchema = z.object({
   name: z.string().min(2, 'Nama minimal 2 karakter'),
-  email: z.string().email('Format email tidak valid'),
+  email: z.email('Format email tidak valid'),
   phone: z.string().min(10).max(15).regex(/^[0-9+]+$/, 'Nomor WhatsApp hanya boleh angka dan +').optional().or(z.literal('')),
   role: z.enum([UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER]),
   password: z.string().min(6, 'Password minimal 6 karakter'),
@@ -16,7 +16,7 @@ export class CreateStaffDto extends createZodDto(CreateStaffSchema) {}
 
 export const UpdateStaffSchema = z.object({
   name: z.string().min(2, 'Nama minimal 2 karakter').optional(),
-  email: z.string().email('Format email tidak valid').optional(),
+  email: z.email('Format email tidak valid').optional(),
   phone: z.string().min(10).max(15).regex(/^[0-9+]+$/, 'Nomor WhatsApp hanya boleh angka dan +').optional().or(z.literal('')),
   role: z.enum([UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER]).optional(),
   isActive: z.boolean().optional(),

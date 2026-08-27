@@ -3,14 +3,14 @@ import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 
 export const VariantOptionSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   name: z.string().min(1, 'Option name is required'),
   extraPrice: z.coerce.number().min(0).default(0),
   isAvailable: z.boolean().default(true).optional(),
 });
 
 export const VariantGroupSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.uuid().optional(),
   name: z.string().min(1, 'Group name is required (e.g. Ukuran, Temperature, Extra)'),
   isRequired: z.boolean().default(false),
   minSelect: z.coerce.number().int().min(0).default(0),
@@ -23,7 +23,7 @@ export const CreateMenuSchema = z.object({
   description: z.string().optional(),
   price: z.coerce.number().positive('Price must be greater than 0'),
   promoPrice: z.coerce.number().positive().optional().nullable(),
-  categoryId: z.string().uuid('Invalid category ID'),
+  categoryId: z.uuid('Invalid category ID'),
   imageUrl: z.string().optional().nullable(),
   isBestSeller: z.boolean().default(false).optional(),
   isRecommended: z.boolean().default(false).optional(),
@@ -38,7 +38,7 @@ export const UpdateMenuSchema = z.object({
   description: z.string().optional().nullable(),
   price: z.coerce.number().positive().optional(),
   promoPrice: z.coerce.number().positive().optional().nullable(),
-  categoryId: z.string().uuid().optional(),
+  categoryId: z.uuid().optional(),
   imageUrl: z.string().optional().nullable(),
   isBestSeller: z.boolean().optional(),
   isRecommended: z.boolean().optional(),
@@ -55,7 +55,7 @@ export const ToggleMenuStatusSchema = z.object({
 export class ToggleMenuStatusDto extends createZodDto(ToggleMenuStatusSchema) {}
 
 export const QueryMenuSchema = PaginationQuerySchema.extend({
-  categoryId: z.string().uuid().optional(),
+  categoryId: z.uuid().optional(),
   isAvailable: z
     .enum(['true', 'false'])
     .transform((val) => val === 'true')
