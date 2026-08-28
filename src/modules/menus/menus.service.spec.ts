@@ -115,8 +115,8 @@ describe('MenusService', () => {
       prismaService.menuItem.findMany.mockResolvedValue([mockMenu]);
 
       const result = await service.findAllAdmin({ page: 1, limit: 10 });
-      expect(result.data).toHaveLength(1);
-      expect(result.meta.total).toBe(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.meta.totalItems).toBe(1);
       expect(result.meta.totalPages).toBe(1);
     });
   });
@@ -210,11 +210,13 @@ describe('MenusService', () => {
         isAvailable: false,
       });
 
-      expect(result.item.isAvailable).toBe(false);
-      expect(prismaService.menuItem.update).toHaveBeenCalledWith({
-        where: { id: 'menu-123' },
-        data: { isAvailable: false },
-      });
+      expect(result.isAvailable).toBe(false);
+      expect(prismaService.menuItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'menu-123' },
+          data: { isAvailable: false },
+        }),
+      );
     });
 
     it('should throw NotFoundException if menu to toggle not found', async () => {

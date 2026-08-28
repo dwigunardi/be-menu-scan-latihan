@@ -179,8 +179,8 @@ describe('OrdersService', () => {
       prismaService.order.findMany.mockResolvedValue([mockOrder]);
 
       const result = await service.findAllAdmin({});
-      expect(result.data).toHaveLength(1);
-      expect(result.meta.total).toBe(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.meta.totalItems).toBe(1);
     });
   });
 

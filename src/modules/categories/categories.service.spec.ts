@@ -20,6 +20,7 @@ describe('CategoriesService', () => {
   beforeEach(async () => {
     prismaService = {
       category: {
+        count: jest.fn().mockResolvedValue(1),
         findMany: jest.fn(),
         findFirst: jest.fn(),
         findUnique: jest.fn(),
@@ -51,7 +52,8 @@ describe('CategoriesService', () => {
       prismaService.category.findMany.mockResolvedValue([mockCategory]);
 
       const result = await service.findAllPublic();
-      expect(result).toHaveLength(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.meta.totalItems).toBe(1);
       expect(prismaService.category.findMany).toHaveBeenCalledWith({
         where: { deletedAt: null },
         orderBy: { sortOrder: 'asc' },
@@ -65,7 +67,8 @@ describe('CategoriesService', () => {
       prismaService.category.findMany.mockResolvedValue([mockCategory]);
 
       const result = await service.findAllAdmin();
-      expect(result).toHaveLength(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.meta.totalItems).toBe(1);
       expect(prismaService.category.findMany).toHaveBeenCalledWith({
         where: { deletedAt: null },
         orderBy: { sortOrder: 'asc' },
@@ -117,36 +120,32 @@ describe('CategoriesService', () => {
   });
 
   describe('update', () => {
-    it('should update category name and sortOrder', async () => {
-      // First findOne, then findFirst for unique check (returns null meaning slug is unique)
+    it('should update category name and slug', async () => {
       prismaService.category.findFirst
-        .mockResolvedValueOnce(mockCategory)
-        .mockResolvedValueOnce(null);
-
+        .mockResolvedValueOnce(mockCategory) // findOne check
+        .mockResolvedValueOnce(null); // slug conflict check
       prismaService.category.update.mockResolvedValue({
         ...mockCategory,
-        name: 'Specialty Coffee',
-        sortOrder: 5,
+        name: 'Special Coffee',
+        slug: 'special-coffee',
       });
 
       const result = await service.update('cat-123', {
-        name: 'Specialty Coffee',
-        sortOrder: 5,
+        name: 'Special Coffee',
       });
-      expect(result.name).toBe('Specialty Coffee');
+      expect(result.name).toBe('Special Coffee');
       expect(prismaService.category.update).toHaveBeenCalledWith({
         where: { id: 'cat-123' },
         data: {
-          name: 'Specialty Coffee',
-          slug: 'specialty-coffee',
-          sortOrder: 5,
+          name: 'Special Coffee',
+          slug: 'special-coffee',
         },
       });
     });
   });
 
   describe('remove', () => {
-    it('should soft delete category by setting deletedAt', async () => {
+    it('should soft delete category if it has no active menu items', async () => {
       prismaService.category.findFirst.mockResolvedValue(mockCategory);
       prismaService.menuItem.count.mockResolvedValue(0);
       prismaService.category.update.mockResolvedValue({
@@ -162,25 +161,26 @@ describe('CategoriesService', () => {
       });
     });
 
-    it('should throw ConflictException if category still contains active items', async () => {
+    it('should throw ConflictException if category has active menu items', async () => {
       prismaService.category.findFirst.mockResolvedValue(mockCategory);
-      prismaService.menuItem.count.mockResolvedValue(3);
+      prismaService.menuItem.count.mockResolvedValue(5);
 
-      await expect(service.remove('cat-123')).rejects.toThrow(ConflictException);
+      await expect(service.remove('cat-123')).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 
   describe('reorder', () => {
-    it('should execute batch update in transaction', async () => {
+    it('should batch update sort orders within a transaction', async () => {
       prismaService.$transaction.mockResolvedValue([]);
 
-      const result = await service.reorder({
-        items: [
-          { id: '11111111-1111-1111-1111-111111111111', sortOrder: 1 },
-          { id: '22222222-2222-2222-2222-222222222222', sortOrder: 2 },
-        ],
-      });
+      const items = [
+        { id: 'cat-1', sortOrder: 1 },
+        { id: 'cat-2', sortOrder: 2 },
+      ];
 
+      const result = await service.reorder({ items });
       expect(result.success).toBe(true);
       expect(prismaService.$transaction).toHaveBeenCalled();
     });
