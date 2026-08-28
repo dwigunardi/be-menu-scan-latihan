@@ -31,6 +31,29 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum AttendanceStatus {
+  ON_TIME
+  LATE
+  EARLY_LEAVE
+  COMPLETED
+  SICK
+  LEAVE
+  ABSENT
+}
+
+enum LeaveType {
+  SICK
+  ANNUAL_LEAVE
+  URGENT_MATTER
+  OTHER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 /// Admin User Model for Authentication & Session Management
 model User {
   id              String    @id @default(uuid())
@@ -49,7 +72,9 @@ model User {
   joinedAt        DateTime  @default(now()) @map("joined_at")
   deletedAt       DateTime? @map("deleted_at")
   createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+    updatedAt       DateTime  @updatedAt @map("updated_at")
+  attendances     Attendance[]
+  leaveRequests   LeaveRequest[]
 
   @@index([role, isActive, deletedAt])
   @@map("users")
@@ -258,4 +283,50 @@ model BranchSetting {
   updatedAt          DateTime @updatedAt @map("updated_at")
 
   @@map("branch_settings")
+}
+
+/// Smart Staff Attendance & Geofencing Records
+model Attendance {
+  id                    String            @id @default(uuid())
+  branchId              String            @default("default-branch") @map("branch_id")
+  staffId               String            @map("staff_id")
+  staff                 User              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  date                  String            // Format: YYYY-MM-DD
+  clockInTime           DateTime?         @map("clock_in_time")
+  clockOutTime          DateTime?         @map("clock_out_time")
+  status                AttendanceStatus  @default(ON_TIME)
+  clockInLat            Float?            @map("clock_in_lat")
+  clockInLon            Float?            @map("clock_in_lon")
+  clockInDistanceMeters Float?            @map("clock_in_distance_meters")
+  isWithinGeofence      Boolean           @default(true) @map("is_within_geofence")
+  workDurationMinutes   Int?              @map("work_duration_minutes")
+  notes                 String?
+  leaveType             LeaveType?        @map("leave_type")
+  leaveStatus           LeaveStatus?      @map("leave_status")
+  leaveReason           String?           @map("leave_reason")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  @@unique([staffId, date])
+  @@index([branchId, date])
+  @@index([status])
+  @@map("attendances")
+}
+
+/// Official Leave & Sick Notice Requests
+model LeaveRequest {
+  id          String      @id @default(uuid())
+  branchId    String      @default("default-branch") @map("branch_id")
+  staffId     String      @map("staff_id")
+  staff       User        @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType   @map("leave_type")
+  startDate   String      @map("start_date") // YYYY-MM-DD
+  endDate     String      @map("end_date")   // YYYY-MM-DD
+  reason      String
+  status      LeaveStatus @default(APPROVED)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  @@index([staffId, startDate, endDate])
+  @@map("leave_requests")
 }
