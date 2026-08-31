@@ -54,8 +54,7 @@ describe('SettingsController', () => {
     it('should return public branch location', async () => {
       const result = await controller.getPublicBranchLocation();
       expect(service.getPublicBranchLocation).toHaveBeenCalled();
-      expect(result.statusCode).toBe(200);
-      expect(result.data.name).toBe('Kumpul Cafe');
+      expect(result.name).toBe('Kumpul Cafe');
     });
   });
 
@@ -63,8 +62,7 @@ describe('SettingsController', () => {
     it('should return full branch settings for admin', async () => {
       const result = await controller.getAdminBranchSetting();
       expect(service.getBranchSetting).toHaveBeenCalled();
-      expect(result.statusCode).toBe(200);
-      expect(result.data.geofenceRadius).toBe(100);
+      expect(result.geofenceRadius).toBe(100);
     });
   });
 
@@ -73,7 +71,7 @@ describe('SettingsController', () => {
       const dto = { geofenceRadius: 150 };
       const result = await controller.updateAdminBranchSetting(dto as any);
       expect(service.updateBranchSetting).toHaveBeenCalledWith(dto);
-      expect(result.statusCode).toBe(200);
+      expect(result.geofenceRadius).toBe(100);
     });
   });
 
@@ -82,7 +80,65 @@ describe('SettingsController', () => {
       const dto = { isStoreOpen: false, storeMode: 'EMERGENCY_CLOSED' as any };
       const result = await controller.updateStoreStatus(dto);
       expect(service.updateStoreStatus).toHaveBeenCalledWith(dto);
-      expect(result.statusCode).toBe(200);
+      expect(result.isStoreOpen).toBe(false);
+    });
+  });
+
+  describe('Shift Templates CRUD', () => {
+    const mockTemplate = {
+      id: 'tmpl-1',
+      name: 'Shift Pagi (Opening)',
+      code: 'PAGI',
+      startTime: '08:00',
+      endTime: '16:00',
+      breakMinutes: 60,
+      colorBadge: 'emerald',
+      isActive: true,
+    };
+
+    beforeEach(() => {
+      service.getShiftTemplates = jest.fn().mockResolvedValue([mockTemplate]);
+      service.createShiftTemplate = jest.fn().mockResolvedValue(mockTemplate);
+      service.updateShiftTemplate = jest.fn().mockResolvedValue(mockTemplate);
+      service.deleteShiftTemplate = jest.fn().mockResolvedValue(mockTemplate);
+      service.seedDefaultShiftTemplates = jest.fn().mockResolvedValue([mockTemplate]);
+    });
+
+    it('should get shift templates', async () => {
+      const result = await controller.getShiftTemplates();
+      expect(service.getShiftTemplates).toHaveBeenCalled();
+      expect(result).toHaveLength(1);
+    });
+
+    it('should create shift template', async () => {
+      const dto = {
+        name: 'Shift Pagi',
+        code: 'PAGI',
+        startTime: '08:00',
+        endTime: '16:00',
+      };
+      const result = await controller.createShiftTemplate(dto as any);
+      expect(service.createShiftTemplate).toHaveBeenCalledWith(dto);
+      expect(result.code).toBe('PAGI');
+    });
+
+    it('should update shift template', async () => {
+      const dto = { name: 'Shift Pagi Update' };
+      const result = await controller.updateShiftTemplate('tmpl-1', dto as any);
+      expect(service.updateShiftTemplate).toHaveBeenCalledWith('tmpl-1', dto);
+      expect(result.id).toBe('tmpl-1');
+    });
+
+    it('should delete shift template', async () => {
+      const result = await controller.deleteShiftTemplate('tmpl-1');
+      expect(service.deleteShiftTemplate).toHaveBeenCalledWith('tmpl-1');
+      expect(result.id).toBe('tmpl-1');
+    });
+
+    it('should seed default shift templates', async () => {
+      const result = await controller.seedDefaultShiftTemplates({ openTime: '08:00', closeTime: '22:00' });
+      expect(service.seedDefaultShiftTemplates).toHaveBeenCalledWith('08:00', '22:00');
+      expect(result).toHaveLength(1);
     });
   });
 });
