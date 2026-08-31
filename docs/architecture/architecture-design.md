@@ -92,47 +92,55 @@ Berikut adalah alur perjalanan HTTP Request terenkripsi yang dicatat langkah dem
 
 ```mermaid
 flowchart TD
-    A[Incoming Encrypted Request] --> B[DecryptPayloadMiddleware]
-    
-    subgraph Step 1: HTTP_INBOUND & PAYLOAD_DECRYPT
-        B -->|Step: HTTP_INBOUND| B1{Handshake Token Valid?}
-        B1 -- No --> B2[Throw 401 Handshake Expired]
-        B1 -- Yes --> B3[AES-256-GCM Decrypt Payload to req.body]
-        B3 -->|Step: PAYLOAD_DECRYPT| C
+    A["Incoming HTTP Request"] --> B["DecryptPayloadMiddleware"]
+
+    subgraph S1["Step 1: Inbound & Decryption (Optional)"]
+        B --> B1{"req.body.encrypted == true?"}
+        B1 -- "Ya" --> B2{"x-handshake-token valid?"}
+        B2 -- "Tidak" --> B_ERR["Throw 400 Bad Request"]
+        B2 -- "Ya (Step: PAYLOAD_DECRYPT)" --> B3["AES-256-GCM Decrypt -> req.body JSON"]
+        B1 -- "Tidak / Plain JSON (Step: HTTP_INBOUND)" --> C["JwtAuthGuard"]
+        B3 --> C
     end
 
-    C[JwtAuthGuard / HandshakeGuard]
-
-    subgraph Step 2: SECURITY_AUTH
-        C -->|Check @Public Decorator| C1{Is Endpoint Public?}
-        C1 -- Yes --> D[ZodValidationPipe]
-        C1 -- No --> C2{Is Access Token Valid?}
-        C2 -- No --> C3[Throw 401 Unauthorized]
-        C2 -- Yes -->|Step: SECURITY_AUTH| C4[Attach User Object to req.user] --> D
+    subgraph S2["Step 2: Authentication & Authorization"]
+        C --> C1{"Route memiliki @Public()?"}
+        C1 -- "Ya (Bypass JWT)" --> D["Global ZodValidationPipe"]
+        C1 -- "Tidak" --> C2{"JWT Access Token Valid?"}
+        C2 -- "Tidak" --> C_ERR["Throw 401 Unauthorized"]
+        C2 -- "Ya (Step: SECURITY_AUTH)" --> C3["RolesGuard: Validasi UserRole"]
+        C3 -- "Role Sesuai" --> D
+        C3 -- "Role Tidak Sesuai" --> C3_ERR["Throw 403 Forbidden"]
     end
 
-    subgraph Step 3: VALIDATION_INPUT
-        D --> D1{Zod Schema Valid?}
-        D1 -- No --> D2[Throw 400 Bad Request / ZodError]
-        D1 -- Yes -->|Step: VALIDATION_INPUT| E[Controller & Service Logic]
+    subgraph S3["Step 3: Input Validation"]
+        D --> D1{"Zod DTO Valid?"}
+        D1 -- "Tidak" --> D_ERR["Throw 400 ZodValidationError"]
+        D1 -- "Ya (Step: VALIDATION_INPUT)" --> E["Controller Handler"]
     end
 
-    subgraph Step 4 & 5: SERVICE_EXECUTION & DATABASE_QUERY
-        E -->|Step: SERVICE_EXECUTION| E1[Prisma Database Query]
-        E1 -->|Step: DATABASE_QUERY| E2[Return Raw Response Object]
+    subgraph S4["Step 4 & 5: Service Execution & Database"]
+        E -->|Step: SERVICE_EXECUTION| E1["Service Business Logic"]
+        E1 -->|Step: DATABASE_QUERY| E2["Prisma ORM (PostgreSQL)"]
+        E2 --> E3["TransformInterceptor: Format { data, meta }"]
     end
 
-    E2 --> F[EncryptPayloadInterceptor]
-
-    subgraph Step 6 & 7: RESPONSE_ENCRYPT & HTTP_OUTBOUND
-        F --> F1{Is @SkipEncryption Present?}
-        F1 -- Yes --> H[Send Raw Response]
-        F1 -- No -->|Step: RESPONSE_ENCRYPT| F2[AES-256-GCM Encrypt Object with Fresh IV]
-        F2 -->|Step: HTTP_OUTBOUND| H[Send Encrypted JSON Response]
+    subgraph S6["Step 6 & 7: Response Encryption & Outbound"]
+        E3 --> F{"Route memiliki @SkipEncryption()?"}
+        F -- "Ya" --> H1["Send Plain JSON Response"]
+        F -- "Tidak" --> F1{"Header x-handshake-token ada?"}
+        F1 -- "Tidak" --> H1
+        F1 -- "Ya (Step: RESPONSE_ENCRYPT)" --> F2["AES-256-GCM Encrypt Payload"]
+        F2 -->|Step: HTTP_OUTBOUND| H2["Send Encrypted Envelope Response"]
     end
 
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style H fill:#bbf,stroke:#333,stroke-width:2px
+    style A fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    style H1 fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style H2 fill:#ede7f6,stroke:#512da8,stroke-width:2px
+    style B_ERR fill:#ffebee,stroke:#d32f2f,stroke-width:1px
+    style C_ERR fill:#ffebee,stroke:#d32f2f,stroke-width:1px
+    style C3_ERR fill:#ffebee,stroke:#d32f2f,stroke-width:1px
+    style D_ERR fill:#ffebee,stroke:#d32f2f,stroke-width:1px
 ```
 
 ---
