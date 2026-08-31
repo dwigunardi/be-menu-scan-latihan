@@ -7,6 +7,7 @@
 > **Security & Auth**: Dual JWT (Access + Refresh Token) & ECDH AES-256-GCM Payload Encryption  
 > **Logging**: Structured Step-Tracing Logger (`nestjs-pino`)  
 > **Document Location**: `docs/architecture/architecture-design.md`  
+> **Detailed API Contract & Checklist**: [`docs/architecture/api-contract-and-security-guidelines.md`](api-contract-and-security-guidelines.md)  
 
 ---
 
@@ -15,12 +16,13 @@
 Arsitektur aplikasi ini dibangun dengan mengadopsi **Feature-Based Modular Architecture** sesuai panduan resmi *NestJS Best Practices*. 
 
 ### Prinsip Utama:
-1. **High Cohesion, Low Coupling**: Setiap domain bisnis (Auth, Categories, Menus) diisolasi dalam modulnya masing-masing.
+1. **High Cohesion, Low Coupling**: Setiap domain bisnis (Auth, Categories, Menus, Attendance, Settings, Staff, Tables, Orders, Reports) diisolasi dalam modulnya masing-masing.
 2. **Single Responsibility Principle (SRP)**:
    - **Controller**: Hanya menangani HTTP routing, ekstraksi request, dan pemanggilan service.
    - **Service**: Menangani seluruh *business logic* dan interaksi dengan database (Prisma).
    - **DTO (Zod)**: Bertanggung jawab atas kontrak dan validasi tipe data *input/output*.
 3. **Layered Lifecycle Pipeline**: Keamanan (Enkripsi/Deskripsi), Otentikasi (JWT), Validasi (Zod), dan Logging dipisahkan secara tegas pada layer *Middleware*, *Guard*, *Pipe*, *Interceptor*, dan *Exception Filter*.
+4. **Zero-Trust Hybrid Encryption**: Seluruh endpoint (baik Public maupun Protected) mendukung response encryption & body decryption otomatis saat `x-handshake-token` dikirimkan (lihat [Panduan API Contract](api-contract-and-security-guidelines.md)).
 
 ---
 
