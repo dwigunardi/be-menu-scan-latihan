@@ -330,3 +330,21 @@ model LeaveRequest {
   @@index([staffId, startDate, endDate])
   @@map("leave_requests")
 }
+
+/// Cafe Master Shift Templates
+model ShiftTemplate {
+  id           String   @id @default(uuid())
+  branchId     String   @default("default-branch") @map("branch_id")
+  name         String   // e.g. "Shift Pagi (Opening)", "Shift Sore (Closing)", "Shift Middle (Peak)"
+  code         String   // e.g. "PAGI", "SORE", "MIDDLE"
+  startTime    String   @map("start_time") // "08:00"
+  endTime      String   @map("end_time")   // "16:00"
+  breakMinutes Int      @default(60) @map("break_minutes")
+  colorBadge   String   @default("emerald") @map("color_badge") // emerald, amber, blue, purple, rose
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([branchId])
+  @@map("shift_templates")
+}

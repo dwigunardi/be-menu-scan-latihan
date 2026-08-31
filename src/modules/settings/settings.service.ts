@@ -16,7 +16,7 @@ const DEFAULT_SCHEDULES = [
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   /**
    * Get branch setting. Auto-seeds default setting if table is empty.
@@ -112,5 +112,124 @@ export class SettingsService {
       closeTime: setting.closeTime,
       timezone: setting.timezone,
     };
+  }
+
+  /**
+   * Get all master shift templates. Auto-seeds defaults if none exist.
+   */
+  async getShiftTemplates() {
+    let templates = await this.prisma.shiftTemplate.findMany({
+      orderBy: { startTime: 'asc' },
+    });
+
+    if (templates.length === 0) {
+      const setting = await this.getBranchSetting();
+      templates = await this.seedDefaultShiftTemplates(setting.openTime, setting.closeTime);
+    }
+
+    return templates;
+  }
+
+  /**
+   * Create a new shift template.
+   */
+  async createShiftTemplate(dto: any) {
+    const template = await this.prisma.shiftTemplate.create({
+      data: {
+        name: dto.name,
+        code: dto.code.toUpperCase(),
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        breakMinutes: dto.breakMinutes ?? 60,
+        colorBadge: dto.colorBadge ?? 'emerald',
+        isActive: dto.isActive ?? true,
+      },
+    });
+
+    this.logger.log(`Created Shift Template: ${template.name} (${template.startTime} - ${template.endTime})`);
+    return template;
+  }
+
+  /**
+   * Update an existing shift template.
+   */
+  async updateShiftTemplate(id: string, dto: any) {
+    const template = await this.prisma.shiftTemplate.update({
+      where: { id },
+      data: {
+        ...(dto.name && { name: dto.name }),
+        ...(dto.code && { code: dto.code.toUpperCase() }),
+        ...(dto.startTime && { startTime: dto.startTime }),
+        ...(dto.endTime && { endTime: dto.endTime }),
+        ...(dto.breakMinutes !== undefined && { breakMinutes: dto.breakMinutes }),
+        ...(dto.colorBadge && { colorBadge: dto.colorBadge }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+    });
+
+    this.logger.log(`Updated Shift Template: ${template.name} (${template.startTime} - ${template.endTime})`);
+    return template;
+  }
+
+  /**
+   * Delete a shift template.
+   */
+  async deleteShiftTemplate(id: string) {
+    const deleted = await this.prisma.shiftTemplate.delete({
+      where: { id },
+    });
+
+    this.logger.log(`Deleted Shift Template: ${deleted.name} (${deleted.id})`);
+    return deleted;
+  }
+
+  /**
+   * Auto-seed standard cafe shift templates (Pagi, Middle, Sore) aligned with store open/close hours.
+   */
+  async seedDefaultShiftTemplates(openTime = '08:00', closeTime = '22:00') {
+    this.logger.log(`Seeding default shift templates aligned with store hours ${openTime} - ${closeTime}...`);
+
+    const defaults = [
+      {
+        name: 'Shift Pagi (Opening)',
+        code: 'PAGI',
+        startTime: openTime,
+        endTime: '16:00',
+        breakMinutes: 60,
+        colorBadge: 'emerald',
+        isActive: true,
+      },
+      {
+        name: 'Shift Middle (Peak Hour)',
+        code: 'MIDDLE',
+        startTime: '11:00',
+        endTime: '19:00',
+        breakMinutes: 60,
+        colorBadge: 'blue',
+        isActive: true,
+      },
+      {
+        name: 'Shift Sore (Closing)',
+        code: 'SORE',
+        startTime: '14:00',
+        endTime: closeTime,
+        breakMinutes: 60,
+        colorBadge: 'amber',
+        isActive: true,
+      },
+    ];
+
+    // Wipe any inactive and recreate fresh templates
+    await this.prisma.shiftTemplate.deleteMany({});
+
+    for (const d of defaults) {
+      await this.prisma.shiftTemplate.create({
+        data: d,
+      });
+    }
+
+    return this.prisma.shiftTemplate.findMany({
+      orderBy: { startTime: 'asc' },
+    });
   }
 }
