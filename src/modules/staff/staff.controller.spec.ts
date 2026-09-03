@@ -67,6 +67,7 @@ describe('StaffController', () => {
         email: 'budi@kumpul.cafe',
         phone: '+6281234567890',
         role: UserRole.CASHIER,
+        password: 'password123',
         pinCode: '1234',
       };
       const result = await controller.create(dto);

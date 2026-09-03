@@ -33,7 +33,7 @@ export const CreateStaffSchema = z.object({
   role: z.enum([UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER]),
   password: z.string().min(6, 'Password minimal 6 karakter'),
   pinCode: z.string().regex(/^\d{4}$/, 'PIN harus berupa 4 angka').optional().or(z.literal('')),
-  dailyShiftHours: z.coerce.number().min(1).max(24).optional().default(8),
+  dailyShiftHours: z.coerce.number().min(1).max(24).optional(),
 });
 
 export class CreateStaffDto extends createZodDto(CreateStaffSchema) {}
@@ -69,7 +69,7 @@ export const UpdateStaffSchema = z.object({
     .or(z.literal('')),
   role: z.enum([UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER]).optional(),
   isActive: z.boolean().optional(),
-  dailyShiftHours: z.coerce.number().min(1).max(24).optional().default(8),
+  dailyShiftHours: z.coerce.number().min(1).max(24).optional(),
 });
 
 export class UpdateStaffDto extends createZodDto(UpdateStaffSchema) {}
