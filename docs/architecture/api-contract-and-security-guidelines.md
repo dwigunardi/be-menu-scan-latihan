@@ -158,6 +158,7 @@ Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan di
 | :--- | :---: | :--- | :--- | :--- |
 | **Auth** | `POST` | `/api/v1/auth/logout` | All Roles | Revoke refresh token & clear session. |
 | **Auth** | `GET` | `/api/v1/auth/me` | All Roles | Mengambil data profil staf yang sedang login. |
+| **Auth** | `POST` | `/api/v1/auth/onboard` | All Roles *(Karantina)* | Aktivasi akun pertama kali (ganti password sementara, set 4-digit PIN, & flip `needsOnboarding: false`). |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/clock-in` | All Roles | Presensi masuk staf dengan verifikasi 4-digit PIN & geofence GPS. |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/clock-out` | All Roles | Presensi pulang staf dengan kalkulasi otomatis durasi kerja. |
 | **Attendance** | `GET` | `/api/v1/admin/attendance` | `ADMIN` | Listing log presensi seluruh staf dengan filter & pagination. |

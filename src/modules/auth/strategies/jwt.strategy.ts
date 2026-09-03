@@ -10,6 +10,7 @@ export interface JwtPayload {
   email: string;
   name: string;
   role: UserRole;
+  needsOnboarding?: boolean;
 }
 
 @Injectable()
@@ -38,6 +39,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         email: true,
         name: true,
         role: true,
+        needsOnboarding: true,
         createdAt: true,
       },
     });

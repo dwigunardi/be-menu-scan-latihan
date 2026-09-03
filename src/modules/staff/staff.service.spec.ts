@@ -18,11 +18,13 @@ describe('StaffService', () => {
 
   const mockUser = {
     id: 'user-123',
+    employeeId: 'KC-001',
     name: 'Ahmad Syahripudin',
     email: 'ahmad@kumpulcafe.com',
     phone: '+6281234567890',
     role: UserRole.KITCHEN,
     pinCode: '$2b$10$hashedpin',
+    needsOnboarding: true,
     dailyShiftHours: 8,
     isActive: true,
     avatarUrl: null,

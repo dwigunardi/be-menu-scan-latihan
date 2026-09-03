@@ -9,10 +9,12 @@ describe('StaffController', () => {
 
   const mockStaff = {
     id: 'staff-1',
+    employeeId: 'KC-001',
     name: 'Budi Kasir',
     email: 'budi@kumpul.cafe',
     phone: '+6281234567890',
     role: UserRole.CASHIER,
+    needsOnboarding: true,
     isActive: true,
   };
 

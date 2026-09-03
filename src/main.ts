@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as express from 'express';
+import helmet from 'helmet';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -36,6 +37,13 @@ async function bootstrap() {
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       },
+    }),
+  );
+
+  // Security HTTP Headers (OWASP)
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
 

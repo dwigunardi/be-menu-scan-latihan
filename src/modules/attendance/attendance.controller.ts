@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { AttendanceService } from './attendance.service';
 import { ClockInDto } from './dto/clock-in.dto';
 import { ClockOutDto } from './dto/clock-out.dto';
@@ -26,6 +27,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('clock-in')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Presensi Masuk Staf dengan Validasi PIN & Geofence GPS' })
@@ -34,6 +36,7 @@ export class AttendanceController {
     return this.attendanceService.recordClockIn(dto);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('clock-out')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Presensi Pulang Staf dengan Validasi PIN & Geofence GPS' })
