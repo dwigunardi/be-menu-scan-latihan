@@ -59,6 +59,11 @@ enum PaymentMethod {
   QRIS
 }
 
+enum PaymentSource {
+  CASHIER // Recorded by staff at the POS
+  GATEWAY // Recorded by the payment gateway webhook
+}
+
 enum CashierShiftStatus {
   OPEN
   CLOSED
@@ -89,6 +94,7 @@ model User {
   leaveRequests   LeaveRequest[]
   openedShifts    CashierShift[] @relation("ShiftOpenedBy")
   closedShifts    CashierShift[] @relation("ShiftClosedBy")
+  receivedPayments Payment[]    @relation("PaymentReceivedBy")
 
   @@index([role, isActive, deletedAt])
   @@index([employeeId])
@@ -231,8 +237,9 @@ model Order {
   status       OrderStatus @default(PENDING)
   totalAmount  Decimal     @db.Decimal(10, 2) @map("total_amount")
   orderItems   OrderItem[]
-  paidAt       DateTime?   @map("paid_at")
-  paymentMethod PaymentMethod? @map("payment_method") // Set when the order becomes PAID; drives shift cash reconciliation
+  payments     Payment[]
+  paidAt       DateTime?   @map("paid_at") // Denormalized from the first Payment; written once
+  paymentMethod PaymentMethod? @map("payment_method") // Denormalized from the first Payment
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
@@ -367,7 +374,7 @@ model ShiftTemplate {
 }
 
 /// Cashier Shift (cash drawer session) with opening float, live totals and Z-Report snapshot on close.
-/// Revenue is attributed to a shift by PAID orders whose paidAt falls within [openedAt, closedAt].
+/// Revenue is attributed to a shift through Payment.shiftId (the shift open when the payment was received).
 model CashierShift {
   id               String             @id @default(uuid())
   branchId         String             @default("default-branch") @map("branch_id")
@@ -394,9 +401,36 @@ model CashierShift {
   closedAt         DateTime?          @map("closed_at")
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
+  payments         Payment[]
 
   @@index([branchId, status])
   @@index([openedAt])
   @@index([staffId])
   @@map("cashier_shifts")
+}
+
+/// Payment ledger: one row per payment received, written by OrderPaymentService.markPaid in the same
+/// transaction that marks the order paid. Order.paidAt / paymentMethod are a denormalized summary.
+model Payment {
+  id           String        @id @default(uuid())
+  orderId      String        @map("order_id")
+  order        Order         @relation(fields: [orderId], references: [id])
+  /// Cashier shift open when the payment was received. Always set for CASH; null for a gateway
+  /// payment received while no shift was open.
+  shiftId      String?       @map("shift_id")
+  shift        CashierShift? @relation(fields: [shiftId], references: [id])
+  method       PaymentMethod
+  source       PaymentSource
+  amount       Decimal       @db.Decimal(12, 2)
+  /// Gateway transaction id. Unique so the same gateway transaction can never be recorded twice.
+  providerRef  String?       @unique @map("provider_ref")
+  receivedById String?       @map("received_by_id") // Staff who took the payment (CASHIER source)
+  receivedBy   User?         @relation("PaymentReceivedBy", fields: [receivedById], references: [id])
+  paidAt       DateTime      @map("paid_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([shiftId, method])
+  @@index([paidAt])
+  @@map("payments")
 }

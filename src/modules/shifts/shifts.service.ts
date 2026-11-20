@@ -18,7 +18,6 @@ import {
   QueryShiftHistoryDto,
   ShiftItemResponse,
 } from './dto/shift.dto';
-import { paidOrderWhere } from '../orders/order-payment';
 import { parseBranchDateBoundary } from '../../common/utils/branch-time';
 
 export const DEFAULT_BRANCH_ID = 'default-branch';
@@ -46,7 +45,8 @@ type ShiftWithRelations = Prisma.CashierShiftGetPayload<{
   include: typeof SHIFT_INCLUDE;
 }>;
 
-type PrismaClientLike = Pick<PrismaService, 'order'> | Prisma.TransactionClient;
+type PrismaClientLike =
+  Pick<PrismaService, 'payment'> | Prisma.TransactionClient;
 
 @Injectable()
 export class ShiftsService {
@@ -67,18 +67,22 @@ export class ShiftsService {
 
     if (!shift) return null;
 
-    const totals = await this.computeTotals(this.prisma, shift.openedAt);
+    const totals = await this.computeTotals(this.prisma, shift.id);
     return this.toResponse(shift, totals);
   }
 
   /**
-   * Whether the branch cash drawer is currently open (used to gate cash payments).
+   * Row-locks the branch's open shift inside the caller's transaction and returns its id (null when the
+   * drawer is closed). Serializes payments with closeShift: a close waits for in-flight payments, and a
+   * payment that waited on a close sees no open shift afterwards, so no payment escapes the Z-Report.
    */
-  async hasOpenShift(branchId: string = DEFAULT_BRANCH_ID): Promise<boolean> {
-    const count = await this.prisma.cashierShift.count({
-      where: { branchId, status: 'OPEN' },
-    });
-    return count > 0;
+  async lockOpenShift(
+    tx: Prisma.TransactionClient,
+    branchId: string = DEFAULT_BRANCH_ID,
+  ): Promise<string | null> {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM cashier_shifts WHERE open_lock_key = ${branchId} FOR UPDATE`;
+    return rows[0]?.id ?? null;
   }
 
   /**
@@ -148,6 +152,8 @@ export class ShiftsService {
     actor: ShiftActor,
   ): Promise<ShiftItemResponse> {
     const closed = await this.prisma.$transaction(async (tx) => {
+      // Waits for in-flight payments holding the lock (see lockOpenShift) before snapshotting totals
+      await tx.$queryRaw`SELECT id FROM cashier_shifts WHERE id = ${id} FOR UPDATE`;
       const shift = await tx.cashierShift.findUnique({ where: { id } });
 
       if (!shift) {
@@ -163,7 +169,7 @@ export class ShiftsService {
       }
 
       const closedAt = new Date();
-      const totals = await this.computeTotals(tx, shift.openedAt, closedAt);
+      const totals = await this.computeTotals(tx, shift.id);
       const expectedCash = shift.openingCash.plus(totals.totalCashRevenue);
       const actualCash = new Prisma.Decimal(dto.actualCash);
       const cashVariance = actualCash.minus(expectedCash);
@@ -243,7 +249,7 @@ export class ShiftsService {
         shift.status === 'OPEN'
           ? this.toResponse(
               shift,
-              await this.computeTotals(this.prisma, shift.openedAt),
+              await this.computeTotals(this.prisma, shift.id),
             )
           : this.toResponse(shift),
       ),
@@ -253,31 +259,27 @@ export class ShiftsService {
   }
 
   /**
-   * Aggregates paid orders within the shift window, split by payment method.
-   * "Paid" follows the shared definition in orders/order-payment.ts.
+   * Aggregates the payments recorded against this shift, split by method. Payments of orders cancelled
+   * afterwards are excluded, matching the shared "paid" definition in orders/order-payment.ts.
    */
   private async computeTotals(
     client: PrismaClientLike,
-    from: Date,
-    to?: Date,
+    shiftId: string,
   ): Promise<ShiftTotals> {
-    const groups = await client.order.groupBy({
-      by: ['paymentMethod'],
-      where: {
-        ...paidOrderWhere({ from, to }),
-        paymentMethod: { not: null },
-      },
+    const groups = await client.payment.groupBy({
+      by: ['method'],
+      where: { shiftId, order: { status: { not: 'CANCELLED' } } },
       _count: { _all: true },
-      _sum: { totalAmount: true },
+      _sum: { amount: true },
     });
 
     const totals = this.emptyTotals();
     for (const group of groups) {
-      const amount = group._sum.totalAmount ?? new Prisma.Decimal(0);
-      if (group.paymentMethod === 'CASH') {
+      const amount = group._sum.amount ?? new Prisma.Decimal(0);
+      if (group.method === 'CASH') {
         totals.totalCashOrders = group._count._all;
         totals.totalCashRevenue = amount;
-      } else if (group.paymentMethod === 'QRIS') {
+      } else if (group.method === 'QRIS') {
         totals.totalQrisOrders = group._count._all;
         totals.totalQrisRevenue = amount;
       }

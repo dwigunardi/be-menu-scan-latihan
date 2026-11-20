@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { OrderPaymentService } from './order-payment.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -29,9 +30,11 @@ describe('OrderPaymentService', () => {
         findUniqueOrThrow: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      payment: { create: jest.fn() },
       table: { update: jest.fn() },
     };
-    shiftsService = { hasOpenShift: jest.fn().mockResolvedValue(true) };
+    prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
+    shiftsService = { lockOpenShift: jest.fn().mockResolvedValue('shift-1') };
     eventsGateway = {
       emitNewPaidOrder: jest.fn(),
       emitOrderStatusChanged: jest.fn(),
@@ -59,13 +62,16 @@ describe('OrderPaymentService', () => {
     ...overrides,
   });
 
-  it('marks an unpaid order paid once, frees the table and emits events', async () => {
+  it('marks an unpaid order paid once, records the payment, frees the table and emits events', async () => {
     prisma.order.findUnique.mockResolvedValue(unpaidOrder);
     prisma.order.findUniqueOrThrow.mockResolvedValue(withRelations());
 
-    const result = await service.markPaid('order-1', 'CASH', 'CASHIER');
+    const result = await service.markPaid('order-1', 'CASH', 'CASHIER', {
+      receivedById: 'cashier-1',
+    });
 
     expect(result.alreadyPaid).toBe(false);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     const args = prisma.order.updateMany.mock.calls[0][0];
     expect(args.where).toEqual({
       id: 'order-1',
@@ -74,6 +80,19 @@ describe('OrderPaymentService', () => {
     });
     expect(args.data).toMatchObject({ status: 'PAID', paymentMethod: 'CASH' });
     expect(args.data.paidAt).toBeInstanceOf(Date);
+    expect(prisma.payment.create).toHaveBeenCalledWith({
+      data: {
+        orderId: 'order-1',
+        shiftId: 'shift-1',
+        method: 'CASH',
+        source: 'CASHIER',
+        amount: 50000,
+        providerRef: null,
+        receivedById: 'cashier-1',
+        // Ledger and order share the same instant
+        paidAt: args.data.paidAt,
+      },
+    });
     expect(prisma.table.update).toHaveBeenCalledWith({
       where: { id: 'table-1' },
       data: { status: 'WAITING_CLEANUP' },
@@ -83,26 +102,62 @@ describe('OrderPaymentService', () => {
 
   it('rejects cash with 409 when no cashier shift is open', async () => {
     prisma.order.findUnique.mockResolvedValue(unpaidOrder);
-    shiftsService.hasOpenShift.mockResolvedValue(false);
+    shiftsService.lockOpenShift.mockResolvedValue(null);
 
     await expect(
       service.markPaid('order-1', 'CASH', 'CASHIER'),
     ).rejects.toThrow(ConflictException);
     expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    expect(prisma.payment.create).not.toHaveBeenCalled();
     expect(prisma.table.update).not.toHaveBeenCalled();
   });
 
-  it('accepts QRIS without an open shift', async () => {
+  it('accepts QRIS without an open shift and records it without a shift', async () => {
     prisma.order.findUnique.mockResolvedValue(unpaidOrder);
     prisma.order.findUniqueOrThrow.mockResolvedValue(
       withRelations({ paymentMethod: 'QRIS' }),
     );
-    shiftsService.hasOpenShift.mockResolvedValue(false);
+    shiftsService.lockOpenShift.mockResolvedValue(null);
+
+    await service.markPaid('order-1', 'QRIS', 'GATEWAY', {
+      providerRef: 'TRX-1',
+    });
+
+    expect(prisma.order.updateMany).toHaveBeenCalled();
+    expect(prisma.payment.create.mock.calls[0][0].data).toMatchObject({
+      shiftId: null,
+      method: 'QRIS',
+      source: 'GATEWAY',
+      providerRef: 'TRX-1',
+      receivedById: null,
+    });
+  });
+
+  it('attaches QRIS to the open shift when one is open', async () => {
+    prisma.order.findUnique.mockResolvedValue(unpaidOrder);
+    prisma.order.findUniqueOrThrow.mockResolvedValue(
+      withRelations({ paymentMethod: 'QRIS' }),
+    );
 
     await service.markPaid('order-1', 'QRIS', 'GATEWAY');
 
-    expect(shiftsService.hasOpenShift).not.toHaveBeenCalled();
-    expect(prisma.order.updateMany).toHaveBeenCalled();
+    expect(prisma.payment.create.mock.calls[0][0].data.shiftId).toBe('shift-1');
+  });
+
+  it('maps a duplicate gateway reference (P2002) to 409', async () => {
+    prisma.order.findUnique.mockResolvedValue(unpaidOrder);
+    prisma.payment.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      service.markPaid('order-1', 'QRIS', 'GATEWAY', { providerRef: 'TRX-1' }),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.table.update).not.toHaveBeenCalled();
+    expect(eventsGateway.emitNewPaidOrder).not.toHaveBeenCalled();
   });
 
   it('is idempotent for a repeated payment with the same method (paidAt untouched)', async () => {
@@ -118,10 +173,11 @@ describe('OrderPaymentService', () => {
 
     expect(result.alreadyPaid).toBe(true);
     expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    expect(prisma.payment.create).not.toHaveBeenCalled();
     expect(prisma.table.update).not.toHaveBeenCalled();
     expect(eventsGateway.emitNewPaidOrder).not.toHaveBeenCalled();
     // Idempotency does not depend on the drawer still being open
-    expect(shiftsService.hasOpenShift).not.toHaveBeenCalled();
+    expect(shiftsService.lockOpenShift).not.toHaveBeenCalled();
   });
 
   it('treats legacy paid orders without a method as already paid', async () => {
@@ -185,6 +241,8 @@ describe('OrderPaymentService', () => {
       const result = await service.markPaid('order-1', 'QRIS', 'GATEWAY');
 
       expect(result.alreadyPaid).toBe(true);
+      // The losing request writes no second ledger row
+      expect(prisma.payment.create).not.toHaveBeenCalled();
       expect(prisma.table.update).not.toHaveBeenCalled();
       expect(eventsGateway.emitNewPaidOrder).not.toHaveBeenCalled();
     });

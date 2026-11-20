@@ -60,9 +60,10 @@ describe('ShiftsService', () => {
       create: jest.fn(),
       updateMany: jest.fn(),
     },
-    order: {
+    payment: {
       groupBy: jest.fn(),
     },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(mockPrisma)),
   };
 
@@ -86,21 +87,21 @@ describe('ShiftsService', () => {
       mockPrisma.cashierShift.findFirst.mockResolvedValue(null);
 
       await expect(service.getCurrentShift()).resolves.toBeNull();
-      expect(mockPrisma.order.groupBy).not.toHaveBeenCalled();
+      expect(mockPrisma.payment.groupBy).not.toHaveBeenCalled();
     });
 
     it('returns the open shift with live totals split by payment method', async () => {
       mockPrisma.cashierShift.findFirst.mockResolvedValue(buildShift());
-      mockPrisma.order.groupBy.mockResolvedValue([
+      mockPrisma.payment.groupBy.mockResolvedValue([
         {
-          paymentMethod: 'CASH',
+          method: 'CASH',
           _count: { _all: 3 },
-          _sum: { totalAmount: D(150000) },
+          _sum: { amount: D(150000) },
         },
         {
-          paymentMethod: 'QRIS',
+          method: 'QRIS',
           _count: { _all: 2 },
-          _sum: { totalAmount: D(80000) },
+          _sum: { amount: D(80000) },
         },
       ]);
 
@@ -122,30 +123,35 @@ describe('ShiftsService', () => {
         openedAt: openedAt.toISOString(),
         closedAt: null,
       });
-      // Attribution by paidAt (paid orders move on to PREPARING/SERVED), excluding cancellations
-      expect(mockPrisma.order.groupBy).toHaveBeenCalledWith(
+      // Attribution by the shift recorded on each payment, excluding orders cancelled afterwards
+      expect(mockPrisma.payment.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
+          by: ['method'],
           where: {
-            paidAt: { not: null, gte: openedAt },
-            status: { not: 'CANCELLED' },
-            paymentMethod: { not: null },
+            shiftId: buildShift().id,
+            order: { status: { not: 'CANCELLED' } },
           },
         }),
       );
     });
   });
 
-  describe('hasOpenShift', () => {
-    it('is true only when the branch has an OPEN shift', async () => {
-      mockPrisma.cashierShift.count
-        .mockResolvedValueOnce(1)
-        .mockResolvedValueOnce(0);
+  describe('lockOpenShift', () => {
+    it('row-locks the open shift by its branch lock key and returns its id, or null', async () => {
+      const tx: any = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([{ id: 'shift-1' }])
+          .mockResolvedValueOnce([]),
+      };
 
-      await expect(service.hasOpenShift()).resolves.toBe(true);
-      await expect(service.hasOpenShift()).resolves.toBe(false);
-      expect(mockPrisma.cashierShift.count).toHaveBeenCalledWith({
-        where: { branchId: DEFAULT_BRANCH_ID, status: 'OPEN' },
-      });
+      await expect(service.lockOpenShift(tx)).resolves.toBe('shift-1');
+      await expect(service.lockOpenShift(tx)).resolves.toBeNull();
+
+      const [strings, branchId] = tx.$queryRaw.mock.calls[0];
+      const sql = strings.join('$1');
+      expect(sql).toContain('WHERE open_lock_key = $1 FOR UPDATE');
+      expect(branchId).toBe(DEFAULT_BRANCH_ID);
     });
   });
 
@@ -206,11 +212,11 @@ describe('ShiftsService', () => {
 
     it('snapshots totals, computes expected cash and variance, and releases the lock', async () => {
       mockPrisma.cashierShift.findUnique.mockResolvedValue(buildShift());
-      mockPrisma.order.groupBy.mockResolvedValue([
+      mockPrisma.payment.groupBy.mockResolvedValue([
         {
-          paymentMethod: 'CASH',
+          method: 'CASH',
           _count: { _all: 3 },
-          _sum: { totalAmount: D(150000) },
+          _sum: { amount: D(150000) },
         },
       ]);
       mockPrisma.cashierShift.updateMany.mockResolvedValue({ count: 1 });
@@ -235,6 +241,17 @@ describe('ShiftsService', () => {
         buildShift().id,
         closeDto,
         cashier,
+      );
+
+      // Locks the shift row before reading totals, so in-flight payments are included
+      const [lockSql, lockedId] = mockPrisma.$queryRaw.mock.calls[0];
+      expect(lockSql.join('$1')).toContain('FOR UPDATE');
+      expect(lockedId).toBe(buildShift().id);
+      expect(mockPrisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        mockPrisma.payment.groupBy.mock.invocationCallOrder[0],
+      );
+      expect(mockPrisma.payment.groupBy.mock.calls[0][0].where.shiftId).toBe(
+        buildShift().id,
       );
 
       const updateArgs = mockPrisma.cashierShift.updateMany.mock.calls[0][0];
@@ -264,7 +281,7 @@ describe('ShiftsService', () => {
 
     it('allows an admin to close a shift opened by a cashier', async () => {
       mockPrisma.cashierShift.findUnique.mockResolvedValue(buildShift());
-      mockPrisma.order.groupBy.mockResolvedValue([]);
+      mockPrisma.payment.groupBy.mockResolvedValue([]);
       mockPrisma.cashierShift.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.cashierShift.findUniqueOrThrow.mockResolvedValue(
         buildShift({
@@ -312,7 +329,7 @@ describe('ShiftsService', () => {
 
     it('throws 409 when a concurrent request closed the shift first', async () => {
       mockPrisma.cashierShift.findUnique.mockResolvedValue(buildShift());
-      mockPrisma.order.groupBy.mockResolvedValue([]);
+      mockPrisma.payment.groupBy.mockResolvedValue([]);
       mockPrisma.cashierShift.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(
@@ -359,7 +376,7 @@ describe('ShiftsService', () => {
           take: 5,
         }),
       );
-      expect(mockPrisma.order.groupBy).not.toHaveBeenCalled();
+      expect(mockPrisma.payment.groupBy).not.toHaveBeenCalled();
       expect(result.items[0]).toMatchObject({
         status: 'CLOSED',
         totalRevenue: 150000,
@@ -378,11 +395,11 @@ describe('ShiftsService', () => {
     it('computes live totals for open shifts in the list', async () => {
       mockPrisma.cashierShift.findMany.mockResolvedValue([buildShift()]);
       mockPrisma.cashierShift.count.mockResolvedValue(1);
-      mockPrisma.order.groupBy.mockResolvedValue([
+      mockPrisma.payment.groupBy.mockResolvedValue([
         {
-          paymentMethod: 'QRIS',
+          method: 'QRIS',
           _count: { _all: 1 },
-          _sum: { totalAmount: D(45000) },
+          _sum: { amount: D(45000) },
         },
       ]);
 

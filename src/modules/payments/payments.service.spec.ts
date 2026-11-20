@@ -134,9 +134,13 @@ describe('PaymentsService', () => {
         alreadyPaid: false,
       });
 
-      const result = await service.handleWebhook(webhook());
+      const result = await service.handleWebhook(
+        webhook({ transactionId: 'TRX-1' }),
+      );
 
-      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'GATEWAY');
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'GATEWAY', {
+        providerRef: 'TRX-1',
+      });
       expect(result).toEqual({
         orderId: 'order-123',
         orderNumber: 'ORD-20260810-001',
@@ -155,7 +159,9 @@ describe('PaymentsService', () => {
 
       await service.handleWebhook(webhook({ paymentType: 'CASH' }));
 
-      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'GATEWAY');
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'GATEWAY', {
+        providerRef: undefined,
+      });
     });
 
     it('should acknowledge a duplicate SETTLEMENT without changes', async () => {

@@ -212,12 +212,16 @@ describe('OrdersService', () => {
       prismaService.order.findUnique.mockResolvedValue(mockOrder);
       orderPaymentService.markPaid.mockResolvedValue({ order: paid, alreadyPaid: false });
 
-      const result = await service.updateStatus('order-123', {
-        status: OrderStatus.PAID,
-      });
+      const result = await service.updateStatus(
+        'order-123',
+        { status: OrderStatus.PAID },
+        'cashier-1',
+      );
 
       expect(result).toBe(paid);
-      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'CASH', 'CASHIER');
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'CASH', 'CASHIER', {
+        receivedById: 'cashier-1',
+      });
       // markPaid owns the write, table status and events
       expect(prismaService.order.update).not.toHaveBeenCalled();
       expect(eventsGateway.emitOrderStatusChanged).not.toHaveBeenCalled();
@@ -232,7 +236,9 @@ describe('OrdersService', () => {
         paymentMethod: 'QRIS',
       });
 
-      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER');
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER', {
+        receivedById: undefined,
+      });
     });
 
     it('should keep the existing method when re-confirming an already paid order', async () => {
@@ -245,7 +251,9 @@ describe('OrdersService', () => {
 
       await service.updateStatus('order-123', { status: OrderStatus.PAID });
 
-      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER');
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER', {
+        receivedById: undefined,
+      });
     });
 
     it('should not touch payment for non-payment status changes', async () => {

@@ -272,7 +272,7 @@ export class OrdersService {
   /**
    * Admin / Staff: Update order status (PENDING -> PAID -> PREPARING -> SERVED / CANCELLED)
    */
-  async updateStatus(id: string, dto: UpdateOrderStatusDto) {
+  async updateStatus(id: string, dto: UpdateOrderStatusDto, actorId?: string) {
     const existing = await this.prisma.order.findUnique({
       where: { id },
     });
@@ -289,6 +289,7 @@ export class OrdersService {
         id,
         method,
         'CASHIER',
+        { receivedById: actorId },
       );
       return order;
     }

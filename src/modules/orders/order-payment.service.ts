@@ -5,12 +5,17 @@ import {
   ConflictException,
   Optional,
 } from '@nestjs/common';
-import { PaymentMethod, Prisma } from '@prisma/client';
+import { PaymentMethod, PaymentSource, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { ShiftsService } from '../shifts/shifts.service';
 
-export type PaymentSource = 'CASHIER' | 'GATEWAY';
+export interface MarkPaidOptions {
+  /** Staff who took the payment (cashier source). */
+  receivedById?: string;
+  /** Gateway transaction id; unique across the payment ledger. */
+  providerRef?: string;
+}
 
 const ORDER_PAYMENT_INCLUDE = {
   table: { include: { zone: true } },
@@ -31,10 +36,11 @@ export interface MarkPaidResult {
  * The only place an order becomes paid. Used by the cashier status endpoint and the payment webhook.
  *
  * Guarantees:
- * - `paidAt` is written exactly once, so a paid order can never move to another cashier shift.
+ * - `paidAt` is written exactly once, together with exactly one Payment ledger row (same transaction),
+ *   so a paid order can never move to another cashier shift.
  * - Repeating a payment with the same method is a no-op (safe for double taps and webhook retries).
  * - A different method on an already-paid order, or paying a cancelled order, is rejected (409).
- * - Cash requires an open cashier shift, so it always lands in a Z-Report.
+ * - Cash requires an open cashier shift and is recorded against it, so it always lands in its Z-Report.
  */
 @Injectable()
 export class OrderPaymentService {
@@ -50,6 +56,7 @@ export class OrderPaymentService {
     orderId: string,
     method: PaymentMethod,
     source: PaymentSource,
+    options: MarkPaidOptions = {},
   ): Promise<MarkPaidResult> {
     const existing = await this.prisma.order.findUnique({
       where: { id: orderId },
@@ -69,19 +76,9 @@ export class OrderPaymentService {
       );
     }
 
-    if (method === 'CASH' && !(await this.shiftsService.hasOpenShift())) {
-      throw new ConflictException(
-        'Belum ada shift kasir yang dibuka. Buka shift terlebih dahulu sebelum menerima pembayaran tunai.',
-      );
-    }
+    const paid = await this.recordPayment(existing, method, source, options);
 
-    // Conditional write: only the first payment wins, even under concurrent cashier + webhook calls
-    const result = await this.prisma.order.updateMany({
-      where: { id: orderId, paidAt: null, status: { not: 'CANCELLED' } },
-      data: { status: 'PAID', paidAt: new Date(), paymentMethod: method },
-    });
-
-    if (result.count === 0) {
+    if (!paid) {
       const current = await this.prisma.order.findUniqueOrThrow({
         where: { id: orderId },
       });
@@ -118,6 +115,63 @@ export class OrderPaymentService {
     });
 
     return { order, alreadyPaid: false };
+  }
+
+  /**
+   * Marks the order paid and writes its ledger row atomically. Returns false when another payment
+   * (or a cancellation) won the race, in which case nothing is written.
+   */
+  private async recordPayment(
+    order: { id: string; totalAmount: Prisma.Decimal },
+    method: PaymentMethod,
+    source: PaymentSource,
+    options: MarkPaidOptions,
+  ): Promise<boolean> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Holds the open shift's row lock until commit, so a concurrent close includes this payment
+        const shiftId = await this.shiftsService.lockOpenShift(tx);
+
+        if (method === 'CASH' && !shiftId) {
+          throw new ConflictException(
+            'Belum ada shift kasir yang dibuka. Buka shift terlebih dahulu sebelum menerima pembayaran tunai.',
+          );
+        }
+
+        const paidAt = new Date();
+        // Conditional write: only the first payment wins, even under concurrent cashier + webhook calls
+        const result = await tx.order.updateMany({
+          where: { id: order.id, paidAt: null, status: { not: 'CANCELLED' } },
+          data: { status: 'PAID', paidAt, paymentMethod: method },
+        });
+
+        if (result.count === 0) return false;
+
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            shiftId,
+            method,
+            source,
+            amount: order.totalAmount,
+            providerRef: options.providerRef ?? null,
+            receivedById: options.receivedById ?? null,
+            paidAt,
+          },
+        });
+        return true;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `Transaksi gateway ${options.providerRef} sudah tercatat untuk pembayaran lain`,
+        );
+      }
+      throw error;
+    }
   }
 
   private async resolveAlreadyPaid(

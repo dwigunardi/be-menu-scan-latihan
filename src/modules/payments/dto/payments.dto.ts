@@ -14,6 +14,8 @@ export const paymentWebhookSchema = z.object({
   grossAmount: z.coerce.number().positive(),
   paymentType: z.enum(['QRIS', 'GOPAY', 'SHOPEEPAY', 'BCA_VA', 'CASH']).default('QRIS'),
   signatureKey: z.string().min(1, 'signatureKey is required'),
+  // Gateway transaction id, stored as the payment's unique provider reference
+  transactionId: z.string().trim().min(1).max(100).optional(),
 });
 
 export class PaymentWebhookDto extends createZodDto(paymentWebhookSchema) {}

@@ -799,7 +799,7 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 - **Detail Menu & Varian**: `GET /api/v1/public/menus/:id` _(Redis Cached)_
 - **Buat Pesanan Baru (Batch 1 / Batch 2)**: `POST /api/v1/public/orders`
 - **Generate QRIS Dinamis**: `POST /api/v1/public/payments/create-qris` (`{ "orderId": "order-uuid" }`)
-- **Payment Gateway Webhook Callback**: `POST /api/v1/public/payments/webhook`
+- **Payment Gateway Webhook Callback**: `POST /api/v1/public/payments/webhook` (field opsional `transactionId` disimpan sebagai referensi unik di ledger `payments`, sehingga transaksi gateway yang sama tidak pernah tercatat dua kali)
 - **Live Tracking Pesanan**: `GET /api/v1/public/orders/:orderNumber`
 
 ---

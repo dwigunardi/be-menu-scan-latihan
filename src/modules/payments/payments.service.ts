@@ -115,10 +115,24 @@ export class PaymentsService {
     }
 
     if (dto.transactionStatus === 'SETTLEMENT') {
+      if (Number(order.totalAmount) !== Number(dto.grossAmount)) {
+        this.logger.warn({
+          step: 'PAYMENT_WEBHOOK_AMOUNT_MISMATCH',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          orderTotal: Number(order.totalAmount),
+          grossAmount: dto.grossAmount,
+          transactionId: dto.transactionId,
+          msg: 'Gateway gross amount differs from the order total; recording the order total',
+        });
+      }
+
       // Gateway money never passes through the cash drawer: always the non-cash (QRIS) bucket
       try {
         const { order: paidOrder, alreadyPaid } =
-          await this.orderPaymentService.markPaid(order.id, 'QRIS', 'GATEWAY');
+          await this.orderPaymentService.markPaid(order.id, 'QRIS', 'GATEWAY', {
+            providerRef: dto.transactionId,
+          });
 
         this.logger.log({
           step: alreadyPaid

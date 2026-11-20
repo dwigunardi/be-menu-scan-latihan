@@ -20,6 +20,7 @@ import {
 } from './dto/order.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Orders')
 @Controller()
@@ -73,7 +74,8 @@ export class OrdersController {
   async updateOrderStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
+    @CurrentUser('id') userId: string,
   ) {
-    return this.ordersService.updateStatus(id, dto);
+    return this.ordersService.updateStatus(id, dto, userId);
   }
 }
