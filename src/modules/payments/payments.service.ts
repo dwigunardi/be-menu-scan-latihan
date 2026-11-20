@@ -11,6 +11,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CreateQrisDto, PaymentWebhookDto } from './dto/payments.dto';
+import { OrderPaymentService } from '../orders/order-payment.service';
+import { isOrderPaid } from '../orders/order-payment';
 
 @Injectable()
 export class PaymentsService {
@@ -19,6 +21,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly orderPaymentService: OrderPaymentService,
     @Optional() private readonly eventsGateway?: EventsGateway,
   ) {}
 
@@ -37,8 +40,12 @@ export class PaymentsService {
       throw new NotFoundException(`Order with ID ${dto.orderId} not found`);
     }
 
-    if (order.status === 'PAID') {
+    if (isOrderPaid(order) || order.status === 'PAID') {
       throw new ConflictException(`Order ${order.orderNumber} is already PAID`);
+    }
+
+    if (order.status === 'CANCELLED') {
+      throw new ConflictException(`Order ${order.orderNumber} is CANCELLED`);
     }
 
     const transactionId = `TRX-${Date.now()}-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -108,49 +115,70 @@ export class PaymentsService {
     }
 
     if (dto.transactionStatus === 'SETTLEMENT') {
-      const updatedOrder = await this.prisma.order.update({
-        where: { id: order.id },
-        data: {
-          status: 'PAID',
-          paidAt: new Date(),
-        },
-        include: {
-          table: true,
-          orderItems: {
-            include: {
-              selectedVariants: true,
-            },
-          },
-        },
-      });
+      // Gateway money never passes through the cash drawer: always the non-cash (QRIS) bucket
+      try {
+        const { order: paidOrder, alreadyPaid } =
+          await this.orderPaymentService.markPaid(order.id, 'QRIS', 'GATEWAY');
 
-      // Emit real-time WebSocket event to Kitchen KDS and customer table!
-      if (this.eventsGateway) {
-        this.eventsGateway.emitNewPaidOrder(updatedOrder);
-        this.eventsGateway.emitOrderStatusChanged(
-          updatedOrder,
-          updatedOrder.table?.number,
-        );
+        this.logger.log({
+          step: alreadyPaid
+            ? 'PAYMENT_WEBHOOK_DUPLICATE'
+            : 'PAYMENT_WEBHOOK_SETTLED',
+          orderId: paidOrder.id,
+          orderNumber: paidOrder.orderNumber,
+          paymentType: dto.paymentType,
+          grossAmount: dto.grossAmount,
+          msg: alreadyPaid
+            ? `Duplicate settlement for ${paidOrder.orderNumber} acknowledged without changes`
+            : `Order ${paidOrder.orderNumber} paid via ${dto.paymentType}`,
+        });
+
+        return {
+          orderId: paidOrder.id,
+          orderNumber: paidOrder.orderNumber,
+          status: paidOrder.status,
+          paidAt: paidOrder.paidAt ?? undefined,
+        };
+      } catch (error) {
+        // Already paid in cash, or cancelled: acknowledge so the gateway stops retrying,
+        // and flag for manual refund review instead of rewriting the order.
+        if (error instanceof ConflictException) {
+          this.logger.warn({
+            step: 'PAYMENT_WEBHOOK_NEEDS_REVIEW',
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentType: dto.paymentType,
+            grossAmount: dto.grossAmount,
+            reason: error.message,
+            msg: 'Gateway settlement could not be applied; manual refund review required',
+          });
+          return {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            status: order.status,
+          };
+        }
+        throw error;
       }
-
-      this.logger.log({
-        step: 'PAYMENT_WEBHOOK_SETTLED',
-        orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
-        status: 'PAID',
-        grossAmount: dto.grossAmount,
-        msg: `Order ${updatedOrder.orderNumber} successfully paid via ${dto.paymentType}. Dispatched real-time alert to kitchen KDS.`,
-      });
-
-      return {
-        orderId: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
-        status: updatedOrder.status,
-        paidAt: updatedOrder.paidAt,
-      };
     }
 
     if (dto.transactionStatus === 'EXPIRED' || dto.transactionStatus === 'CANCEL') {
+      // An expired/cancelled QR must not cancel an order already paid another way (e.g. cash)
+      if (isOrderPaid(order)) {
+        this.logger.log({
+          step: 'PAYMENT_WEBHOOK_IGNORED_PAID',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          transactionStatus: dto.transactionStatus,
+          msg: `Ignored ${dto.transactionStatus} callback: order already paid`,
+        });
+        return {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+        };
+      }
+
       const cancelledOrder = await this.prisma.order.update({
         where: { id: order.id },
         data: { status: 'CANCELLED' },

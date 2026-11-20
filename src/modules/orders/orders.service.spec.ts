@@ -2,12 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersService, OrderStatus } from './orders.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
+import { OrderPaymentService } from './order-payment.service';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 
 describe('OrdersService', () => {
   let service: OrdersService;
   let prismaService: any;
   let eventsGateway: any;
+  let orderPaymentService: any;
 
   const mockTable = {
     id: 'table-123',
@@ -62,11 +64,16 @@ describe('OrdersService', () => {
       emitOrderStatusChanged: jest.fn(),
     };
 
+    orderPaymentService = {
+      markPaid: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
         { provide: PrismaService, useValue: prismaService },
         { provide: EventsGateway, useValue: eventsGateway },
+        { provide: OrderPaymentService, useValue: orderPaymentService },
       ],
     }).compile();
 
@@ -200,21 +207,57 @@ describe('OrdersService', () => {
       expect(eventsGateway.emitOrderStatusChanged).toHaveBeenCalled();
     });
 
-    it('should set paidAt and emit paid event when status becomes PAID', async () => {
+    it('should delegate PAID to the payment entry point, defaulting to CASH', async () => {
+      const paid = { ...mockOrder, status: OrderStatus.PAID, paidAt: new Date() };
       prismaService.order.findUnique.mockResolvedValue(mockOrder);
-      prismaService.table.update.mockResolvedValue(mockTable);
-      prismaService.order.update.mockResolvedValue({
-        ...mockOrder,
-        status: OrderStatus.PAID,
-        paidAt: new Date(),
-      });
+      orderPaymentService.markPaid.mockResolvedValue({ order: paid, alreadyPaid: false });
 
       const result = await service.updateStatus('order-123', {
         status: OrderStatus.PAID,
       });
 
-      expect(result.status).toBe(OrderStatus.PAID);
-      expect(eventsGateway.emitNewPaidOrder).toHaveBeenCalled();
+      expect(result).toBe(paid);
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'CASH', 'CASHIER');
+      // markPaid owns the write, table status and events
+      expect(prismaService.order.update).not.toHaveBeenCalled();
+      expect(eventsGateway.emitOrderStatusChanged).not.toHaveBeenCalled();
+    });
+
+    it('should pass an explicit paymentMethod through', async () => {
+      prismaService.order.findUnique.mockResolvedValue(mockOrder);
+      orderPaymentService.markPaid.mockResolvedValue({ order: mockOrder, alreadyPaid: false });
+
+      await service.updateStatus('order-123', {
+        status: OrderStatus.PAID,
+        paymentMethod: 'QRIS',
+      });
+
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER');
+    });
+
+    it('should keep the existing method when re-confirming an already paid order', async () => {
+      prismaService.order.findUnique.mockResolvedValue({
+        ...mockOrder,
+        paidAt: new Date(),
+        paymentMethod: 'QRIS',
+      });
+      orderPaymentService.markPaid.mockResolvedValue({ order: mockOrder, alreadyPaid: true });
+
+      await service.updateStatus('order-123', { status: OrderStatus.PAID });
+
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER');
+    });
+
+    it('should not touch payment for non-payment status changes', async () => {
+      prismaService.order.findUnique.mockResolvedValue(mockOrder);
+      prismaService.order.update.mockResolvedValue({ ...mockOrder, status: OrderStatus.SERVED });
+
+      await service.updateStatus('order-123', { status: OrderStatus.SERVED });
+
+      expect(orderPaymentService.markPaid).not.toHaveBeenCalled();
+      expect(prismaService.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: OrderStatus.SERVED } }),
+      );
     });
 
     it('should throw NotFoundException if order to update not found', async () => {

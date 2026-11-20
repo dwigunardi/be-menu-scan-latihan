@@ -54,6 +54,16 @@ enum LeaveStatus {
   REJECTED
 }
 
+enum PaymentMethod {
+  CASH
+  QRIS
+}
+
+enum CashierShiftStatus {
+  OPEN
+  CLOSED
+}
+
 /// Admin User Model for Authentication & Session Management
 model User {
   id              String    @id @default(uuid())
@@ -77,6 +87,8 @@ model User {
   updatedAt       DateTime  @updatedAt @map("updated_at")
   attendances     Attendance[]
   leaveRequests   LeaveRequest[]
+  openedShifts    CashierShift[] @relation("ShiftOpenedBy")
+  closedShifts    CashierShift[] @relation("ShiftClosedBy")
 
   @@index([role, isActive, deletedAt])
   @@index([employeeId])
@@ -220,12 +232,14 @@ model Order {
   totalAmount  Decimal     @db.Decimal(10, 2) @map("total_amount")
   orderItems   OrderItem[]
   paidAt       DateTime?   @map("paid_at")
+  paymentMethod PaymentMethod? @map("payment_method") // Set when the order becomes PAID; drives shift cash reconciliation
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
   @@index([tableId])
   @@index([status])
   @@index([createdAt])
+  @@index([status, paidAt])
   @@map("orders")
 }
 
@@ -350,4 +364,39 @@ model ShiftTemplate {
 
   @@index([branchId])
   @@map("shift_templates")
+}
+
+/// Cashier Shift (cash drawer session) with opening float, live totals and Z-Report snapshot on close.
+/// Revenue is attributed to a shift by PAID orders whose paidAt falls within [openedAt, closedAt].
+model CashierShift {
+  id               String             @id @default(uuid())
+  branchId         String             @default("default-branch") @map("branch_id")
+  staffId          String             @map("staff_id") // Cashier who opened the shift
+  staff            User               @relation("ShiftOpenedBy", fields: [staffId], references: [id])
+  closedById       String?            @map("closed_by_id")
+  closedBy         User?              @relation("ShiftClosedBy", fields: [closedById], references: [id])
+  status           CashierShiftStatus @default(OPEN)
+  /// Equals branchId while OPEN and NULL once CLOSED. The unique constraint guarantees
+  /// at most one open shift (one cash drawer) per branch, even under concurrent requests.
+  openLockKey      String?            @unique @map("open_lock_key")
+  openingCash      Decimal            @db.Decimal(12, 2) @map("opening_cash")
+  expectedCash     Decimal?           @db.Decimal(12, 2) @map("expected_cash")
+  actualCash       Decimal?           @db.Decimal(12, 2) @map("actual_cash")
+  cashVariance     Decimal?           @db.Decimal(12, 2) @map("cash_variance")
+  totalCashOrders  Int                @default(0) @map("total_cash_orders")
+  totalQrisOrders  Int                @default(0) @map("total_qris_orders")
+  totalCashRevenue Decimal            @default(0) @db.Decimal(12, 2) @map("total_cash_revenue")
+  totalQrisRevenue Decimal            @default(0) @db.Decimal(12, 2) @map("total_qris_revenue")
+  totalRevenue     Decimal            @default(0) @db.Decimal(12, 2) @map("total_revenue")
+  openingNotes     String?            @map("opening_notes")
+  closingNotes     String?            @map("closing_notes")
+  openedAt         DateTime           @default(now()) @map("opened_at")
+  closedAt         DateTime?          @map("closed_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@index([branchId, status])
+  @@index([openedAt])
+  @@index([staffId])
+  @@map("cashier_shifts")
 }

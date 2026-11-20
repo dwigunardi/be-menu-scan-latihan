@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
+import { OrderPaymentService } from './order-payment.service';
 import {
   CreateOrderDto,
   QueryOrderDto,
@@ -30,6 +31,7 @@ export class OrdersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderPaymentService: OrderPaymentService,
     @Optional() private readonly eventsGateway?: EventsGateway,
   ) {}
 
@@ -279,19 +281,21 @@ export class OrdersService {
       throw new NotFoundException(`Order with ID ${id} not found`);
     }
 
+    // Payments go through the single payment entry point (write-once paidAt, cash requires open shift).
+    // Without an explicit method, re-confirming an already paid order keeps its method (idempotent).
+    if (dto.status === OrderStatus.PAID) {
+      const method = dto.paymentMethod ?? existing.paymentMethod ?? 'CASH';
+      const { order } = await this.orderPaymentService.markPaid(
+        id,
+        method,
+        'CASHIER',
+      );
+      return order;
+    }
+
     const data: Prisma.OrderUpdateInput = {
       status: dto.status,
     };
-
-    if (dto.status === OrderStatus.PAID) {
-      data.paidAt = new Date();
-      if (existing.tableId) {
-        await this.prisma.table.update({
-          where: { id: existing.tableId },
-          data: { status: 'WAITING_CLEANUP' as any },
-        });
-      }
-    }
 
     const updated = await this.prisma.order.update({
       where: { id },
@@ -307,9 +311,6 @@ export class OrdersService {
 
     // Real-Time WebSocket Alerts
     if (this.eventsGateway) {
-      if (dto.status === OrderStatus.PAID) {
-        this.eventsGateway.emitNewPaidOrder(updated);
-      }
       this.eventsGateway.emitOrderStatusChanged(updated, updated.table?.number);
     }
 

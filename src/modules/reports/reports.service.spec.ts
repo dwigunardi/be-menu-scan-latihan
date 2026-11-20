@@ -80,6 +80,29 @@ describe('ReportsService', () => {
       expect(result.topSellingToday[0].name).toBe('Caramel Macchiato');
     });
 
+    it('should count paid orders by paidAt from the start of the WIB day (not status PAID)', async () => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      // 01:30 WIB on 21 Nov = 18:30 UTC on 20 Nov; "today" must start at 21 Nov 00:00 WIB
+      jest.setSystemTime(new Date('2026-11-20T18:30:00.000Z'));
+      try {
+        await service.getDashboardOverview();
+      } finally {
+        jest.useRealTimers();
+      }
+
+      const paidToday = {
+        paidAt: { not: null, gte: new Date('2026-11-20T17:00:00.000Z') },
+        status: { not: 'CANCELLED' },
+      };
+      expect(prismaService.order.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({ where: paidToday }),
+      );
+      expect(prismaService.order.count).toHaveBeenCalledWith({ where: paidToday });
+      expect(prismaService.orderItem.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { order: paidToday } }),
+      );
+    });
+
     it('should handle zero tables gracefully', async () => {
       prismaService.table.count.mockResolvedValue(0);
       prismaService.order.findMany.mockResolvedValue([
@@ -126,6 +149,18 @@ describe('ReportsService', () => {
       expect(result.totalOrders).toBe(0);
       expect(result.averageOrderValue).toBe(0);
       expect(result.ordersByStatus).toEqual([]);
+
+      const from = new Date('2026-08-01T00:00:00.000+07:00');
+      const to = new Date('2026-08-10T23:59:59.999+07:00');
+      // Revenue by payment time; status breakdown by creation time, both within the WIB range
+      expect(prismaService.order.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { paidAt: { not: null, gte: from, lte: to }, status: { not: 'CANCELLED' } },
+        }),
+      );
+      expect(prismaService.order.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { createdAt: { gte: from, lte: to } } }),
+      );
     });
   });
 
@@ -147,6 +182,16 @@ describe('ReportsService', () => {
       expect(prismaService.orderItem.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           take: 10,
+          where: {
+            order: {
+              paidAt: {
+                not: null,
+                gte: new Date('2026-08-01T00:00:00.000+07:00'),
+                lte: new Date('2026-08-10T23:59:59.999+07:00'),
+              },
+              status: { not: 'CANCELLED' },
+            },
+          },
         }),
       );
     });
