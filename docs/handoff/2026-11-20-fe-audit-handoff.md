@@ -3,7 +3,7 @@
 > **Tanggal**: 2026-11-20  
 > **Dari**: sesi audit & perbaikan di repo frontend `fe-menu-scan-latihan` (branch `feat/admin-cms`, belum di-commit)  
 > **Untuk**: siapa pun (manusia atau Claude) yang mengerjakan repo backend ini  
-> **Status**: menunggu dikerjakan  
+> **Status**: sebagian selesai. Modul shift dan konsolidasi pembayaran sudah ada di branch lokal `feat/cashier-shift-payment` (belum di-push); lihat bagian 6  
 
 Dokumen ini berdiri sendiri: tidak perlu membaca percakapan apa pun untuk memahaminya. Semua path `fe/...` merujuk ke `d:\code\fe-menu-scan-latihan`.
 
@@ -91,4 +91,30 @@ Setelah diperbarui, salin ulang ke `fe/docs/be/`.
 - [ ] `PATCH /admin/attendance/:id/correction`
 - [ ] Audit `RolesGuard` di semua controller `admin/*`
 - [ ] Sinkronkan `docs/integration/frontend-integration-guide.md`
-- [ ] Beri kabar ke FE setelah selesai, supaya `fe/docs/fe/integration/api-endpoints.md` diperbarui
+- [ ] Beri kabar ke FE setelah selesai (update shift & pembayaran sudah dikirim 2026-11-21; sisanya menyusul), supaya `fe/docs/fe/integration/api-endpoints.md` diperbarui
+
+---
+
+## 6. Update backend 2026-11-21: shift kasir & pembayaran
+
+Sudah ada di branch lokal `feat/cashier-shift-payment` (commit `6a13442`, `b84dc4f`), belum di-push. Jalankan backend dari branch ini untuk integrasi.
+
+### Endpoint shift (`@Roles(ADMIN, CASHIER)`)
+
+| Method | Path | Catatan |
+| :--- | :--- | :--- |
+| `GET` | `/admin/shifts/current` | `null` jika tidak ada shift terbuka. Total dihitung live. |
+| `POST` | `/admin/shifts/open` | Body `{ openingCash, notes? }` → `201`. `409` jika sudah ada shift terbuka (satu per cabang). |
+| `POST` | `/admin/shifts/:id/close` | Body `{ actualCash, notes? }` → `200` + snapshot Z-Report. `403` jika bukan pembuka shift atau ADMIN, `409` jika sudah ditutup. |
+| `GET` | `/admin/shifts?page&limit&startDate&endDate&status` | `limit` 1–100. Tanggal `YYYY-MM-DD` (hari WIB) atau ISO datetime. |
+
+Respons mengikuti `ShiftItemSchema` FE, ditambah `closedById`, `closedByName`, `openingNotes`, `closingNotes`. `notes` = `closingNotes ?? openingNotes`. `expectedCash = openingCash + totalCashRevenue`, `cashVariance = actualCash - expectedCash`.
+
+### Perubahan perilaku yang perlu ditangani FE
+
+1. **Bayar tunai wajib ada shift terbuka.** `PUT /admin/orders/:id/status` dengan `status: PAID` (metode `CASH`) membalas `409` "Belum ada shift kasir yang dibuka..." jika laci belum dibuka. Tampilkan pesannya dan arahkan kasir ke buka shift.
+2. **Field opsional `paymentMethod: 'CASH' | 'QRIS'`** di body update status. Default `CASH`. Menandai PAID ulang dengan metode yang sama aman (respons `200`, tidak ada perubahan); dengan metode berbeda membalas `409`.
+3. **Definisi "sudah dibayar" = `paidAt` terisi dan status bukan `CANCELLED`.** Order PREPARING/SERVED yang sudah dibayar ikut dihitung di dashboard, laporan omzet, dan menu terlaris, jadi angkanya akan naik dibanding sebelumnya. Omzet dihitung per `paidAt` dengan batas hari WIB.
+4. **Parameter `startDate`/`endDate` laporan** harus tanggal `YYYY-MM-DD` atau ISO datetime; nilai lain dibalas `400`.
+5. **`create-qris`** menolak (`409`) order yang sudah dibayar (walaupun statusnya sudah PREPARING/SERVED) atau dibatalkan.
+6. Bentuk respons endpoint order, pembayaran, dan laporan tidak berubah.
