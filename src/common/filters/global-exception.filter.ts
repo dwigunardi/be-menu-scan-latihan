@@ -24,6 +24,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let errorTitle = 'Internal Server Error';
     let message = 'An unexpected error occurred on the server.';
     let details: any = undefined;
+    // Optional machine-readable code (e.g. SHIFT_NOT_OPEN) so clients don't parse message text
+    let code: string | undefined = undefined;
 
     // 1. Handle Zod Validation Errors
     if (exception instanceof ZodValidationException) {
@@ -71,6 +73,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         errorTitle = (res as any).error || exception.name;
         message = (res as any).message || exception.message;
         details = (res as any).details;
+        code = typeof (res as any).code === 'string' ? (res as any).code : undefined;
       } else {
         errorTitle = exception.name;
         message = res as string;
@@ -98,6 +101,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       statusCode,
       error: errorTitle,
       message,
+      ...(code ? { code } : {}),
       details,
       timestamp: new Date().toISOString(),
     });

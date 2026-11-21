@@ -10,6 +10,9 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { ShiftsService } from '../shifts/shifts.service';
 
+/** Error code sent with the 409 for a cash payment while no cashier shift is open (FE shows "Buka Shift"). */
+export const SHIFT_NOT_OPEN = 'SHIFT_NOT_OPEN';
+
 export interface MarkPaidOptions {
   /** Staff who took the payment (cashier source). */
   receivedById?: string;
@@ -133,9 +136,12 @@ export class OrderPaymentService {
         const shiftId = await this.shiftsService.lockOpenShift(tx);
 
         if (method === 'CASH' && !shiftId) {
-          throw new ConflictException(
-            'Belum ada shift kasir yang dibuka. Buka shift terlebih dahulu sebelum menerima pembayaran tunai.',
-          );
+          throw new ConflictException({
+            error: 'Conflict',
+            code: SHIFT_NOT_OPEN,
+            message:
+              'Belum ada shift kasir yang dibuka. Buka shift terlebih dahulu sebelum menerima pembayaran tunai.',
+          });
         }
 
         const paidAt = new Date();

@@ -104,9 +104,12 @@ describe('OrderPaymentService', () => {
     prisma.order.findUnique.mockResolvedValue(unpaidOrder);
     shiftsService.lockOpenShift.mockResolvedValue(null);
 
-    await expect(
-      service.markPaid('order-1', 'CASH', 'CASHIER'),
-    ).rejects.toThrow(ConflictException);
+    const error = await service
+      .markPaid('order-1', 'CASH', 'CASHIER')
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    // Machine-readable code so the FE can offer "Buka Shift" without parsing the message
+    expect(error.getResponse()).toMatchObject({ code: 'SHIFT_NOT_OPEN' });
     expect(prisma.order.updateMany).not.toHaveBeenCalled();
     expect(prisma.payment.create).not.toHaveBeenCalled();
     expect(prisma.table.update).not.toHaveBeenCalled();
