@@ -304,7 +304,8 @@ export class StaffService {
     const hashedPin = await bcrypt.hash(dto.pinCode, 10);
     await this.prisma.user.update({
       where: { id },
-      data: { pinCode: hashedPin },
+      // A new PIN from an admin also lifts any verify-pin lockout
+      data: { pinCode: hashedPin, pinFailedAttempts: 0, pinLockedUntil: null },
     });
 
     return {

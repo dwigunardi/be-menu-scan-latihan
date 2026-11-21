@@ -86,7 +86,7 @@ Setelah diperbarui, salin ulang ke `fe/docs/be/`.
 ## 5. Checklist
 
 - [x] Modul shift kasir: `GET current`, `POST open`, `POST :id/close`, `GET` riwayat berpaginasi (`src/modules/shifts/`, 2026-11-20)
-- [ ] `POST /auth/verify-pin` + rate limit
+- [x] `POST /auth/verify-pin` + rate limit (2026-11-21: kunci 5 menit setelah 5x salah berturut-turut → `429`; throttle 10 request/menit per IP; reset PIN oleh admin membuka kunci)
 - [ ] `PATCH /admin/attendance/:id/overtime`
 - [ ] `PATCH /admin/attendance/:id/correction`
 - [ ] Audit `RolesGuard` di semua controller `admin/*`

@@ -1,10 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AuthService } from './auth.service';
+import { AuthService, PIN_MAX_ATTEMPTS } from './auth.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EcdhService } from '../../common/crypto/ecdh.service';
-import { UnauthorizedException, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  NotFoundException,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
@@ -264,5 +270,123 @@ describe('AuthService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
-});
 
+  describe('verifyPin', () => {
+    let pinHash: string;
+    const pinUser = (overrides: Record<string, unknown> = {}) => ({
+      id: 'user-123',
+      pinCode: pinHash,
+      isActive: true,
+      pinFailedAttempts: 0,
+      pinLockedUntil: null as Date | null,
+      ...overrides,
+    });
+
+    beforeAll(async () => {
+      pinHash = await bcrypt.hash('2580', 10);
+    });
+
+    it('returns valid true for the correct PIN of the JWT user', async () => {
+      prismaService.user.findUnique.mockResolvedValue(pinUser());
+
+      await expect(
+        service.verifyPin('user-123', { pinCode: '2580' }),
+      ).resolves.toEqual({ valid: true });
+      expect(prismaService.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'user-123' } }),
+      );
+      // Nothing to reset when there were no failures
+      expect(prismaService.user.update).not.toHaveBeenCalled();
+    });
+
+    it('resets the failure counter after a correct PIN', async () => {
+      prismaService.user.findUnique.mockResolvedValue(
+        pinUser({ pinFailedAttempts: 3 }),
+      );
+
+      await service.verifyPin('user-123', { pinCode: '2580' });
+
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+        data: { pinFailedAttempts: 0, pinLockedUntil: null },
+      });
+    });
+
+    it('returns valid false (never 401) and counts a wrong PIN atomically', async () => {
+      prismaService.user.findUnique.mockResolvedValue(pinUser());
+      prismaService.user.update.mockResolvedValue({ pinFailedAttempts: 1 });
+
+      await expect(
+        service.verifyPin('user-123', { pinCode: '1111' }),
+      ).resolves.toEqual({ valid: false });
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+        data: { pinFailedAttempts: { increment: 1 } },
+        select: { pinFailedAttempts: true },
+      });
+    });
+
+    it(`locks for 5 minutes with 429 on the ${PIN_MAX_ATTEMPTS}th consecutive failure`, async () => {
+      prismaService.user.findUnique.mockResolvedValue(
+        pinUser({ pinFailedAttempts: PIN_MAX_ATTEMPTS - 1 }),
+      );
+      prismaService.user.update
+        .mockResolvedValueOnce({ pinFailedAttempts: PIN_MAX_ATTEMPTS })
+        .mockResolvedValueOnce({});
+      const before = Date.now();
+
+      const error = await service
+        .verifyPin('user-123', { pinCode: '1111' })
+        .catch((e) => e);
+
+      expect(error).toBeInstanceOf(HttpException);
+      expect(error.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+      const lockArgs = prismaService.user.update.mock.calls[1][0];
+      expect(lockArgs.data.pinFailedAttempts).toBe(0);
+      const lockMs = lockArgs.data.pinLockedUntil.getTime() - before;
+      expect(lockMs).toBeGreaterThanOrEqual(5 * 60_000 - 1000);
+      expect(lockMs).toBeLessThanOrEqual(5 * 60_000 + 1000);
+    });
+
+    it('refuses with 429 while locked, without checking the PIN (even a correct one)', async () => {
+      prismaService.user.findUnique.mockResolvedValue(
+        pinUser({ pinLockedUntil: new Date(Date.now() + 3 * 60_000) }),
+      );
+      const error = await service
+        .verifyPin('user-123', { pinCode: '2580' })
+        .catch((e) => e);
+
+      // A correct PIN is still refused: the PIN is not evaluated while locked
+      expect(error.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+      expect(error.message).toContain('3 menit');
+      expect(prismaService.user.update).not.toHaveBeenCalled();
+    });
+
+    it('verifies again once the lock has expired', async () => {
+      prismaService.user.findUnique.mockResolvedValue(
+        pinUser({ pinLockedUntil: new Date(Date.now() - 1000) }),
+      );
+
+      await expect(
+        service.verifyPin('user-123', { pinCode: '2580' }),
+      ).resolves.toEqual({ valid: true });
+      // Clears the stale lock
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+        data: { pinFailedAttempts: 0, pinLockedUntil: null },
+      });
+    });
+
+    it.each([
+      ['has no PIN yet', { pinCode: null }],
+      ['is inactive', { isActive: false }],
+    ])('returns valid false when the user %s', async (_label, overrides) => {
+      prismaService.user.findUnique.mockResolvedValue(pinUser(overrides));
+
+      await expect(
+        service.verifyPin('user-123', { pinCode: '2580' }),
+      ).resolves.toEqual({ valid: false });
+      expect(prismaService.user.update).not.toHaveBeenCalled();
+    });
+  });
+});

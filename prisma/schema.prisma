@@ -79,6 +79,8 @@ model User {
   phone           String?   @unique
   role            UserRole  @default(ADMIN)
   pinCode         String?   @map("pin_code") // Hashed 4-digit PIN for clock-in
+  pinFailedAttempts Int     @default(0) @map("pin_failed_attempts") // Consecutive wrong PINs on /auth/verify-pin
+  pinLockedUntil  DateTime? @map("pin_locked_until") // PIN verification refused (429) until this time
   needsOnboarding Boolean   @default(true) @map("needs_onboarding")
   dailyShiftHours Int       @default(8) @map("daily_shift_hours")
   isActive        Boolean   @default(true) @map("is_active")
