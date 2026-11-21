@@ -3,6 +3,8 @@ import {
   parseBranchDateBoundary,
   startOfBranchDay,
   toBranchDateRange,
+  toBranchDateString,
+  branchDateTime,
 } from './branch-time';
 
 describe('branch-time', () => {
@@ -48,5 +50,20 @@ describe('branch-time', () => {
       BranchDateQuerySchema.safeParse('2026-11-20T12:00:00+07:00').success,
     ).toBe(true);
     expect(BranchDateQuerySchema.safeParse('kemarin').success).toBe(false);
+  });
+
+  it('gives the WIB calendar date of an instant', () => {
+    expect(toBranchDateString(new Date('2026-11-20T23:30:00.000Z'))).toBe(
+      '2026-11-21',
+    );
+    expect(toBranchDateString(new Date('2026-11-20T16:59:00.000Z'))).toBe(
+      '2026-11-20',
+    );
+  });
+
+  it('builds the instant of a WIB wall-clock time', () => {
+    expect(branchDateTime('2026-11-20', '22:30').toISOString()).toBe(
+      '2026-11-20T15:30:00.000Z',
+    );
   });
 });

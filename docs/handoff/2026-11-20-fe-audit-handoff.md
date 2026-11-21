@@ -87,8 +87,9 @@ Setelah diperbarui, salin ulang ke `fe/docs/be/`.
 
 - [x] Modul shift kasir: `GET current`, `POST open`, `POST :id/close`, `GET` riwayat berpaginasi (`src/modules/shifts/`, 2026-11-20)
 - [x] `POST /auth/verify-pin` + rate limit (2026-11-21: kunci 5 menit setelah 5x salah berturut-turut → `429`; throttle 10 request/menit per IP; reset PIN oleh admin membuka kunci)
-- [ ] `PATCH /admin/attendance/:id/overtime`
-- [ ] `PATCH /admin/attendance/:id/correction`
+- [x] `PATCH /admin/attendance/:id/overtime` (2026-11-21, lihat bagian 7)
+- [x] `PATCH /admin/attendance/:id/correction` (2026-11-21, lihat bagian 7)
+- [x] Respons semua endpoint presensi diselaraskan dengan schema FE (2026-11-21, lihat bagian 7)
 - [ ] Audit `RolesGuard` di semua controller `admin/*`
 - [ ] Sinkronkan `docs/integration/frontend-integration-guide.md`
 - [ ] Beri kabar ke FE setelah selesai (update shift & pembayaran sudah dikirim 2026-11-21; sisanya menyusul), supaya `fe/docs/fe/integration/api-endpoints.md` diperbarui
@@ -112,9 +113,57 @@ Respons mengikuti `ShiftItemSchema` FE, ditambah `closedById`, `closedByName`, `
 
 ### Perubahan perilaku yang perlu ditangani FE
 
-1. **Bayar tunai wajib ada shift terbuka.** `PUT /admin/orders/:id/status` dengan `status: PAID` (metode `CASH`) membalas `409` "Belum ada shift kasir yang dibuka..." jika laci belum dibuka. Tampilkan pesannya dan arahkan kasir ke buka shift.
+1. **Bayar tunai wajib ada shift terbuka.** `PUT /admin/orders/:id/status` dengan `status: PAID` (metode `CASH`) membalas `409` "Belum ada shift kasir yang dibuka..." jika laci belum dibuka. Tampilkan pesannya dan arahkan kasir ke buka shift. Body error membawa `code: "SHIFT_NOT_OPEN"`; cek field ini, jangan teks pesannya.
 2. **Field opsional `paymentMethod: 'CASH' | 'QRIS'`** di body update status. Default `CASH`. Menandai PAID ulang dengan metode yang sama aman (respons `200`, tidak ada perubahan); dengan metode berbeda membalas `409`.
 3. **Definisi "sudah dibayar" = `paidAt` terisi dan status bukan `CANCELLED`.** Order PREPARING/SERVED yang sudah dibayar ikut dihitung di dashboard, laporan omzet, dan menu terlaris, jadi angkanya akan naik dibanding sebelumnya. Omzet dihitung per `paidAt` dengan batas hari WIB.
 4. **Parameter `startDate`/`endDate` laporan** harus tanggal `YYYY-MM-DD` atau ISO datetime; nilai lain dibalas `400`.
 5. **`create-qris`** menolak (`409`) order yang sudah dibayar (walaupun statusnya sudah PREPARING/SERVED) atau dibatalkan.
 6. Bentuk respons endpoint order, pembayaran, dan laporan tidak berubah.
+
+---
+
+## 7. Update backend 2026-11-21: presensi (lembur, koreksi, kontrak respons)
+
+Ada di branch lokal `feat/cashier-shift-payment`, belum di-push.
+
+### Kontrak respons sekarang mengikuti schema FE
+
+Sebelumnya endpoint presensi mengirim baris Prisma mentah (`staff: {...}`, tanpa `staffName`/`staffRole`), sehingga gagal di `AttendanceItemSchema` FE. Sekarang:
+
+| Endpoint | Respons |
+| :--- | :--- |
+| `POST /admin/attendance/clock-in`, `clock-out` | `AttendanceItem` |
+| `GET /admin/attendance` | `{ items: AttendanceItem[], meta }` |
+| `GET /admin/attendance/summary?date` | `{ date, totalStaff, presentCount, onTimeCount, lateCount, earlyLeaveCount, leaveCount, absentCount, attendanceRatePercent }` |
+| `POST /admin/attendance/leave` | `{ success: true, message }` |
+| `PATCH /admin/attendance/:id/overtime`, `/correction` | `AttendanceItem` |
+
+Catatan field `AttendanceItem`:
+
+- `clockInTime` / `clockOutTime`: ISO datetime (UTC), bukan `HH:mm`.
+- `date`: tanggal WIB. Presensi jam 00:00–07:00 WIB sekarang masuk hari yang benar (sebelumnya memakai tanggal UTC). Batas terlambat (`openTime` + `lateGracePeriod`) juga dihitung dalam WIB.
+- `isAutoClosed` selalu `false` dan `actingRole` selalu `null`: auto clock-out dan peran pengganti belum ada di backend.
+- `attendanceRatePercent` = hadir ÷ total staf aktif × 100.
+
+### Lembur
+
+- `overtimeMinutes` dihitung saat clock-out = durasi kerja − `dailyShiftHours` staf × 60, minimal 0. Statusnya pending (`isOvertimeApproved: null`) sampai admin meninjau.
+- `PATCH /admin/attendance/:id/overtime` (ADMIN), body `{ status, approvedMinutes?, notes? }`:
+  - `APPROVED`: menit hasil hitung disetujui → `isOvertimeApproved: true`.
+  - `REJECTED`: 0 menit → `isOvertimeApproved: false`. `overtimeMinutes` tetap menampilkan menit hasil hitung.
+  - `OVERRIDDEN`: wajib `approvedMinutes` (0–1440) → `isOvertimeApproved: true`, dan `overtimeMinutes` di respons berisi `approvedMinutes`.
+  - Review boleh diulang; keputusan terakhir yang berlaku. `overtimeApprovedById` = admin peninjau.
+- Error: `400` jika `APPROVED`/`REJECTED` tanpa lembur hasil hitung (pakai `OVERRIDDEN` untuk lembur manual) atau `approvedMinutes` tidak valid; `409` jika staf belum presensi pulang; `404` jika presensi tidak ada; `403` untuk non-ADMIN.
+
+### Koreksi jam pulang
+
+- `PATCH /admin/attendance/:id/correction` (ADMIN), body `{ clockOutTime, notes }`. `notes` 3–500 karakter.
+- `clockOutTime` boleh `HH:mm` (dari input `type="time"`) atau ISO datetime. `HH:mm` dibaca sebagai jam WIB pada tanggal presensi; jika tidak setelah jam masuk, dianggap hari berikutnya (shift lewat tengah malam).
+- Bisa dipakai untuk staf yang lupa presensi pulang (`clockOutTime` masih kosong).
+- Durasi kerja dan lembur dihitung ulang. Jika menit lembur berubah, review lembur di-reset ke pending.
+- Error: `400` jika jam pulang tidak setelah jam masuk, di masa depan, membuat durasi lebih dari 24 jam, atau presensi tidak punya jam masuk.
+- Jejak audit tersimpan di backend (pengoreksi, waktu, alasan, jam pulang sebelum koreksi pertama), tetapi tidak dikirim di respons.
+
+### Catatan kecil untuk FE
+
+- `AttendanceCorrectionModal` memakai `attendance.clockOutTime` langsung sebagai nilai awal input `type="time"`. Karena nilainya ISO datetime, input akan kosong; format dulu ke `HH:mm` WIB.

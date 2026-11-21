@@ -48,6 +48,12 @@ enum LeaveType {
   OTHER
 }
 
+enum OvertimeReviewStatus {
+  APPROVED   // Computed overtime accepted as-is
+  REJECTED   // No overtime granted
+  OVERRIDDEN // Admin granted a different number of minutes
+}
+
 enum LeaveStatus {
   PENDING
   APPROVED
@@ -92,7 +98,9 @@ model User {
   deletedAt       DateTime? @map("deleted_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
-  attendances     Attendance[]
+  attendances     Attendance[]   @relation("AttendanceStaff")
+  reviewedOvertimes Attendance[] @relation("OvertimeReviewedBy")
+  correctedAttendances Attendance[] @relation("AttendanceCorrectedBy")
   leaveRequests   LeaveRequest[]
   openedShifts    CashierShift[] @relation("ShiftOpenedBy")
   closedShifts    CashierShift[] @relation("ShiftClosedBy")
@@ -316,7 +324,7 @@ model Attendance {
   id                    String            @id @default(uuid())
   branchId              String            @default("default-branch") @map("branch_id")
   staffId               String            @map("staff_id")
-  staff                 User              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staff                 User              @relation("AttendanceStaff", fields: [staffId], references: [id], onDelete: Cascade)
   date                  String            // Format: YYYY-MM-DD
   clockInTime           DateTime?         @map("clock_in_time")
   clockOutTime          DateTime?         @map("clock_out_time")
@@ -326,6 +334,22 @@ model Attendance {
   clockInDistanceMeters Float?            @map("clock_in_distance_meters")
   isWithinGeofence      Boolean           @default(true) @map("is_within_geofence")
   workDurationMinutes   Int?              @map("work_duration_minutes")
+  /// Minutes worked beyond the staff's dailyShiftHours, computed at clock-out and on correction
+  overtimeMinutes       Int?              @map("overtime_minutes")
+  /// Admin decision on the overtime; null = pending review
+  overtimeReviewStatus  OvertimeReviewStatus? @map("overtime_review_status")
+  /// Minutes granted: computed minutes when APPROVED, 0 when REJECTED, the admin's value when OVERRIDDEN
+  approvedOvertimeMinutes Int?            @map("approved_overtime_minutes")
+  overtimeReviewedById  String?           @map("overtime_reviewed_by_id")
+  overtimeReviewedBy    User?             @relation("OvertimeReviewedBy", fields: [overtimeReviewedById], references: [id])
+  overtimeReviewedAt    DateTime?         @map("overtime_reviewed_at")
+  overtimeNotes         String?           @map("overtime_notes")
+  /// Last admin correction of the clock-out time (audit trail)
+  correctedById         String?           @map("corrected_by_id")
+  correctedBy           User?             @relation("AttendanceCorrectedBy", fields: [correctedById], references: [id])
+  correctedAt           DateTime?         @map("corrected_at")
+  correctionNotes       String?           @map("correction_notes")
+  originalClockOutTime  DateTime?         @map("original_clock_out_time") // Clock-out before the first correction
   notes                 String?
   leaveType             LeaveType?        @map("leave_type")
   leaveStatus           LeaveStatus?      @map("leave_status")

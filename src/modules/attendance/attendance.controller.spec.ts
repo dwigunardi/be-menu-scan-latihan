@@ -121,4 +121,26 @@ describe('AttendanceController', () => {
       expect(result.id).toBe('leave-1');
     });
   });
+
+  describe('reviewOvertime', () => {
+    it('passes the attendance id, review and reviewer to the service', async () => {
+      service.reviewOvertime = jest.fn().mockResolvedValue(mockAttendance);
+      const dto = { status: 'APPROVED' as const };
+
+      await controller.reviewOvertime('att-1', dto, 'admin-1');
+
+      expect(service.reviewOvertime).toHaveBeenCalledWith('att-1', dto, 'admin-1');
+    });
+  });
+
+  describe('correctAttendance', () => {
+    it('passes the attendance id, correction and corrector to the service', async () => {
+      service.correctClockOut = jest.fn().mockResolvedValue(mockAttendance);
+      const dto = { clockOutTime: '17:00', notes: 'Lupa presensi pulang' };
+
+      await controller.correctAttendance('att-1', dto, 'admin-1');
+
+      expect(service.correctClockOut).toHaveBeenCalledWith('att-1', dto, 'admin-1');
+    });
+  });
 });

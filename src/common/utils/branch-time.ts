@@ -29,12 +29,19 @@ export function parseBranchDateBoundary(
   return new Date(value);
 }
 
+/** The WIB calendar date (`YYYY-MM-DD`) of an instant. */
+export function toBranchDateString(now: Date = new Date()): string {
+  return new Date(now.getTime() + BRANCH_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 /** Start of the current WIB day as a UTC instant. */
 export function startOfBranchDay(now: Date = new Date()): Date {
-  const wibDate = new Date(now.getTime() + BRANCH_OFFSET_MS)
-    .toISOString()
-    .slice(0, 10);
-  return parseBranchDateBoundary(wibDate, 'start');
+  return parseBranchDateBoundary(toBranchDateString(now), 'start');
+}
+
+/** The instant of a WIB wall-clock time (`HH:mm`) on a WIB date (`YYYY-MM-DD`). */
+export function branchDateTime(date: string, time: string): Date {
+  return new Date(`${date}T${time}:00${BRANCH_UTC_OFFSET}`);
 }
 
 /** Builds a Prisma-style `{ gte, lte }` range from optional filter values. */
