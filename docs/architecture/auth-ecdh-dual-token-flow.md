@@ -134,7 +134,7 @@ sequenceDiagram
    - Pelanggan memindai QR fisik di meja kafe yang mengarahkan ke web app.
 2. **Klaim Meja / Buka Sesi (`POST /tables/Meja 01/session`)**:
    - Pelanggan memasukkan nama tamu (misal: "Budi").
-   - Backend mengubah status meja dari `VACANT` $ightarrow$ `OCCUPIED`.
+   - Backend mengubah status meja dari `VACANT` $\rightarrow$ `OCCUPIED`.
    - Pelanggan dapat membuat pesanan yang langsung terikat dengan nomor meja dan zona area meja tersebut.
 
 ---
