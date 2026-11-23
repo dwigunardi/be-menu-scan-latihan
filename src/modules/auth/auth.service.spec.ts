@@ -150,7 +150,7 @@ describe('AuthService', () => {
         ...mockUser,
         refreshToken: hashedRefreshToken,
       });
-      prismaService.user.update.mockResolvedValue(mockUser);
+      prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 1 });
 
       const result = await service.refreshTokens(
         'user-123',
@@ -159,7 +159,28 @@ describe('AuthService', () => {
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
-      expect(prismaService.user.update).toHaveBeenCalled();
+      // Rotation only replaces the exact hash that was verified
+      const args = prismaService.user.updateMany.mock.calls[0][0];
+      expect(args.where).toEqual({
+        id: 'user-123',
+        refreshToken: hashedRefreshToken,
+      });
+      expect(args.data.refreshToken).toEqual(expect.any(String));
+      expect(args.data.refreshToken).not.toBe(hashedRefreshToken);
+    });
+
+    it('issues no tokens (401) when the session was revoked or rotated during the refresh', async () => {
+      // e.g. a shift handover or logout cleared the hash between the read and the write
+      const hashedRefreshToken = await bcrypt.hash('valid-refresh-token', 10);
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        refreshToken: hashedRefreshToken,
+      });
+      prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.refreshTokens('user-123', 'valid-refresh-token'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException when refresh token hash does not match', async () => {

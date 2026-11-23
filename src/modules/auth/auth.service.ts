@@ -232,10 +232,21 @@ export class AuthService {
     );
 
     const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
-    await this.prisma.user.update({
-      where: { id: user.id },
+    // Conditional rotation: only replace the exact hash we verified. If a logout, shift handover or another
+    // refresh changed it meanwhile (two bcrypt calls make that window ~100ms+), a plain update would
+    // resurrect a revoked session or overwrite a newer one.
+    const rotated = await this.prisma.user.updateMany({
+      where: { id: user.id, refreshToken: user.refreshToken },
       data: { refreshToken: refreshTokenHash },
     });
+    if (rotated.count === 0) {
+      this.logger.warn({
+        step: 'AUTH_REFRESH_SUPERSEDED',
+        userId: user.id,
+        msg: 'Refresh token was revoked or rotated during refresh; no tokens issued',
+      });
+      throw new UnauthorizedException('Session was revoked or refreshed elsewhere');
+    }
 
     this.logger.log({
       step: 'AUTH_REFRESH',
