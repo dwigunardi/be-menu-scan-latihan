@@ -118,11 +118,12 @@ Didaftarkan secara global di [`src/main.ts`](file:///d:/code/be-menu-scan-latiha
     }
     ```
 - Jika tidak ada header `x-handshake-token` $\rightarrow$ mengembalikan plain data.
+- Jika handler memakai `@ZodResponse(schema)`, schema diterapkan **sebelum** enkripsi (validasi + buang field yang tidak dideklarasikan). `TransformInterceptor` hanya melihat amplop terenkripsi, jadi hardening untuk respons terenkripsi harus terjadi di sini. Jika data tidak cocok dengan schema, backend mencatat `RESPONSE_SCHEMA_VALIDATION_WARNING` dan tetap mengirim data mentah.
 
 ### D. Pengecualian Khusus (`@SkipEncryption()`)
 Hanya digunakan pada 2 kondisi:
 1. **`POST /api/v1/auth/handshake`**: Endpoint pembentukan kunci publik (belum memiliki session key).
-2. **`POST /api/v1/public/payments/webhook`**: Endpoint callback dari server Payment Gateway pihak ketiga (Midtrans/Xendit) yang mengirim payload JSON standar tanpa handshake token.
+2. **`POST /api/v1/public/payments/webhook`**: Endpoint callback dari server Payment Gateway pihak ketiga (Midtrans/Xendit) yang mengirim payload JSON standar tanpa handshake token. Keamanannya bergantung pada signature `SHA512(orderNumber + grossAmount + PAYMENT_WEBHOOK_SECRET)` yang dibandingkan secara constant-time. `signatureKey: "test_bypass_key"` hanya diterima di luar production, dan di production aplikasi menolak start jika `PAYMENT_WEBHOOK_SECRET` masih nilai default dari repo.
 
 ---
 
@@ -152,18 +153,25 @@ Endpoint ini **tidak memerlukan JWT** (menggunakan decorator `@Public()`).
 ---
 
 ### B. Katalog API Protected / Admin / Staff
-Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan diverifikasi hak akses rolenya (`@Roles(...)`).
+Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan diverifikasi hak akses rolenya (`@Roles(...)`). Route `admin/*` tanpa `@Roles` **ditolak (`403`) secara default** oleh `RolesGuard`, jadi setiap route admin baru wajib menulis role-nya secara eksplisit. "All Roles" di tabel berarti `ADMIN`, `CASHIER`, `KITCHEN`, `WAITER`.
 
 | Modul | Method | Path | Allowed Roles | Fungsi & Kegunaan |
 | :--- | :---: | :--- | :--- | :--- |
 | **Auth** | `POST` | `/api/v1/auth/logout` | All Roles | Revoke refresh token & clear session. |
 | **Auth** | `GET` | `/api/v1/auth/me` | All Roles | Mengambil data profil staf yang sedang login. |
 | **Auth** | `POST` | `/api/v1/auth/onboard` | All Roles *(Karantina)* | Aktivasi akun pertama kali (ganti password sementara, set 4-digit PIN, & flip `needsOnboarding: false`). |
-| **Attendance** | `POST` | `/api/v1/admin/attendance/clock-in` | All Roles | Presensi masuk staf dengan verifikasi 4-digit PIN & geofence GPS. |
-| **Attendance** | `POST` | `/api/v1/admin/attendance/clock-out` | All Roles | Presensi pulang staf dengan kalkulasi otomatis durasi kerja. |
+| **Auth** | `POST` | `/api/v1/auth/verify-pin` | All Roles | Verifikasi PIN milik user JWT untuk keluar mode kiosk. `200 { valid }`, tidak pernah `401`; terkunci `429` setelah 5x salah (lockout dibagi dengan clock-in/out). |
+| **Attendance** | `POST` | `/api/v1/admin/attendance/clock-in` | All Roles | Presensi masuk staf dengan verifikasi 4-digit PIN & geofence GPS. PIN terkunci $\rightarrow$ `429`. |
+| **Attendance** | `POST` | `/api/v1/admin/attendance/clock-out` | All Roles | Presensi pulang staf; hitung durasi kerja dan menit lembur. PIN terkunci $\rightarrow$ `429`. |
 | **Attendance** | `GET` | `/api/v1/admin/attendance` | `ADMIN` | Listing log presensi seluruh staf dengan filter & pagination. |
-| **Attendance** | `GET` | `/api/v1/admin/attendance/summary` | `ADMIN` | KPI summary harian (hadir, tepat waktu, telat, cuti, % disiplin). |
+| **Attendance** | `GET` | `/api/v1/admin/attendance/summary` | `ADMIN` | KPI summary harian WIB (hadir, tepat waktu, telat, pulang awal, cuti, absen, % kehadiran). |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/leave` | `ADMIN` | Pengajuan izin / sakit resmi staf. |
+| **Attendance** | `PATCH` | `/api/v1/admin/attendance/:id/overtime` | `ADMIN` | Review lembur: `APPROVED`, `REJECTED`, atau `OVERRIDDEN` dengan `approvedMinutes`. |
+| **Attendance** | `PATCH` | `/api/v1/admin/attendance/:id/correction` | `ADMIN` | Koreksi jam pulang (`HH:mm` WIB atau ISO); durasi & lembur dihitung ulang. |
+| **Shifts** | `GET` | `/api/v1/admin/shifts/current` | `ADMIN`, `CASHIER` | Shift kasir yang sedang terbuka beserta total live, atau `null`. |
+| **Shifts** | `POST` | `/api/v1/admin/shifts/open` | `ADMIN`, `CASHIER` | Buka shift dengan modal kas awal. Satu shift terbuka per cabang (`409`). |
+| **Shifts** | `POST` | `/api/v1/admin/shifts/:id/close` | `ADMIN`, `CASHIER` | Tutup shift + snapshot Z-Report. Hanya pembuka shift atau ADMIN (`403`). |
+| **Shifts** | `GET` | `/api/v1/admin/shifts` | `ADMIN`, `CASHIER` | Riwayat shift terpaginasi, filter tanggal WIB & status. |
 | **Staff** | `GET` | `/api/v1/admin/staff` | `ADMIN` | Listing seluruh staf dengan paginasi, search, dan role filter. |
 | **Staff** | `GET` | `/api/v1/admin/staff/:id` | `ADMIN` | Detail data profil staf berdasarkan ID. |
 | **Staff** | `POST` | `/api/v1/admin/staff` | `ADMIN` | Menambahkan akun staf baru beserta role & PIN. |
@@ -188,7 +196,7 @@ Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan di
 | **Categories**| `PUT` | `/api/v1/admin/categories/reorder` | `ADMIN` | Batch update urutan sorting kategori (`sortOrder`). |
 | **Categories**| `PUT` | `/api/v1/admin/categories/:id` | `ADMIN` | Mengubah nama atau slug kategori. |
 | **Categories**| `DELETE`| `/api/v1/admin/categories/:id` | `ADMIN` | Soft delete kategori (validasi tidak ada menu aktif). |
-| **Tables** | `GET` | `/api/v1/admin/tables` | All Roles | Listing meja floor plan beserta status sesi aktif. |
+| **Tables** | `GET` | `/api/v1/admin/tables` | `ADMIN`, `CASHIER`, `WAITER` | Listing meja floor plan beserta status sesi aktif. |
 | **Tables** | `POST`| `/api/v1/admin/tables` | `ADMIN` | Menambahkan nomor meja dan kapasitas kursi baru. |
 | **Tables** | `PUT` | `/api/v1/admin/tables/:id` | `ADMIN` | Mengubah konfigurasi meja, tipe kursi, dan zona. |
 | **Tables** | `POST`| `/api/v1/admin/tables/:id/reset` | `ADMIN`, `CASHIER`, `WAITER` | Reset sesi meja menjadi `VACANT` setelah dibersihkan. |
@@ -198,7 +206,7 @@ Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan di
 | **Table Zones**| `PUT` | `/api/v1/admin/table-zones/:id` | `ADMIN` | Memperbarui nama, deskripsi, warna badge, & sort order zona. |
 | **Table Zones**| `DELETE`| `/api/v1/admin/table-zones/:id` | `ADMIN` | Menghapus zona meja (otomatis unbind meja terkait). |
 | **Orders** | `GET` | `/api/v1/admin/orders` | All Roles | Live KDS / POS order monitoring terpaginasi dengan filter status. |
-| **Orders** | `PUT` | `/api/v1/admin/orders/:id/status` | All Roles | Update status pesanan (`PENDING` $\rightarrow$ `PAID` $\rightarrow$ `PREPARING` $\rightarrow$ `SERVED` / `CANCELLED`). |
+| **Orders** | `PUT` / `PATCH` | `/api/v1/admin/orders/:id/status` | All Roles *(PAID & CANCELLED: `ADMIN`, `CASHIER`)* | Update status pesanan. `PAID` lewat satu pintu pembayaran (`paymentMethod?` `CASH` \| `QRIS`, tunai wajib ada shift terbuka $\rightarrow$ `409` `code: SHIFT_NOT_OPEN`). KITCHEN/WAITER ke `PAID`/`CANCELLED` $\rightarrow$ `403`. |
 | **Reports** | `GET` | `/api/v1/admin/reports/dashboard-overview` | `ADMIN` | Ringkasan metrik dashboard eksekutif (omset, transaksi, meja aktif). |
 | **Reports** | `GET` | `/api/v1/admin/reports/revenue` | `ADMIN` | Laporan analitik pendapatan terperinci berdasarkan rentang tanggal. |
 | **Reports** | `GET` | `/api/v1/admin/reports/top-selling` | `ADMIN` | Laporan menu terlaris (*best-selling*) dan kontribusi profit. |
@@ -231,7 +239,7 @@ export class CreateExampleDto extends createZodDto(CreateExampleSchema) {}
 
 ### Langkah 2: Tentukan Level Hak Akses (Public vs Protected)
 - **Jika Endpoint Public (Bisa diakses tanpa login)**: Tambahkan decorator `@Public()` dari `src/common/decorators/public.decorator.ts`.
-- **Jika Endpoint Protected (Wajib Login)**: Jangan tambahkan `@Public()`. Tambahkan `@Roles(UserRole.ADMIN, ...)` untuk membatasi role yang diizinkan.
+- **Jika Endpoint Protected (Wajib Login)**: Jangan tambahkan `@Public()`. Tambahkan `@Roles(UserRole.ADMIN, ...)` untuk membatasi role yang diizinkan. Untuk route `admin/*`, `@Roles` **wajib**: tanpa itu `RolesGuard` menolak semua request (`403`). Jika memang semua role boleh, tulis keempat role secara eksplisit.
 
 ```typescript
 // Contoh Endpoint Public

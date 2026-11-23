@@ -15,6 +15,7 @@ describe('AuthController', () => {
       onboard: jest.fn(),
       logout: jest.fn(),
       getMe: jest.fn(),
+      verifyPin: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -155,6 +156,19 @@ describe('AuthController', () => {
       const result = await controller.onboard('u1', dto);
       expect(result).toEqual(expectedResponse);
       expect(authService.onboard).toHaveBeenCalledWith('u1', dto);
+    });
+  });
+
+  describe('verifyPin', () => {
+    it('verifies the PIN of the JWT user, not one from the body', async () => {
+      authService.verifyPin.mockResolvedValue({ valid: true });
+
+      const result = await controller.verifyPin('u1', { pinCode: '2580' });
+
+      expect(result).toEqual({ valid: true });
+      expect(authService.verifyPin).toHaveBeenCalledWith('u1', {
+        pinCode: '2580',
+      });
     });
   });
 });

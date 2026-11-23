@@ -98,7 +98,11 @@ describe('StaffService', () => {
 
   it('updatePin should update staff hashed pin', async () => {
     const result = await service.updatePin('user-123', { pinCode: '4321' });
-    expect(prisma.user.update).toHaveBeenCalled();
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-123' },
+      // A new PIN also lifts any verify-pin lockout
+      data: expect.objectContaining({ pinFailedAttempts: 0, pinLockedUntil: null }),
+    });
     expect(result.success).toBe(true);
   });
 

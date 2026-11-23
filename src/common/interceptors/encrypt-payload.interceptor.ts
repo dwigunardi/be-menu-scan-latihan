@@ -2,7 +2,10 @@ import { Injectable, NestInterceptor, ExecutionContext, CallHandler, Logger } fr
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { z } from 'zod';
 import { IS_SKIP_ENCRYPTION_KEY } from '../decorators/skip-encryption.decorator';
+import { ZOD_RESPONSE_KEY } from '../decorators/zod-response.decorator';
+import { applyResponseSchema } from './response-schema.util';
 import { EcdhService } from '../crypto/ecdh.service';
 import { CryptoService } from '../crypto/crypto.service';
 
@@ -34,9 +37,18 @@ export class EncryptPayloadInterceptor implements NestInterceptor {
 
         // Encrypt response if handshake token is provided
         if (handshakeToken) {
+          // Harden before encrypting: TransformInterceptor only sees the envelope and cannot strip fields
+          const responseSchema = this.reflector.getAllAndOverride<z.ZodTypeAny | undefined>(
+            ZOD_RESPONSE_KEY,
+            [context.getHandler()],
+          );
+          const hardened = responseSchema
+            ? applyResponseSchema(responseSchema, data, this.logger, context.getHandler().name)
+            : data;
+
           try {
             const sessionKey = this.ecdhService.getSessionKey(handshakeToken);
-            const jsonString = typeof data === 'string' ? data : JSON.stringify(data);
+            const jsonString = typeof hardened === 'string' ? hardened : JSON.stringify(hardened);
             const encryptedEnvelope = this.cryptoService.encrypt(jsonString, sessionKey);
 
             this.logger.log({

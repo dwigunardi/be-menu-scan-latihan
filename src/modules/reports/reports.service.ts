@@ -3,6 +3,11 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueryRevenueDto, QueryTopSellingDto } from './dto/report.dto';
 import { Prisma } from '@prisma/client';
 import { OrderStatus } from '../orders/orders.service';
+import { paidOrderWhere } from '../orders/order-payment';
+import {
+  startOfBranchDay,
+  toBranchDateRange,
+} from '../../common/utils/branch-time';
 
 @Injectable()
 export class ReportsService {
@@ -14,8 +19,8 @@ export class ReportsService {
    * Admin: Get Realtime Consolidated Dashboard Overview
    */
   async getDashboardOverview() {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    // Business day in WIB, independent of server timezone
+    const paidToday = paidOrderWhere({ from: startOfBranchDay() });
 
     const [
       todayRevenueAggregate,
@@ -28,18 +33,12 @@ export class ReportsService {
     ] = await Promise.all([
       // 1. Today's Revenue
       this.prisma.order.aggregate({
-        where: {
-          status: OrderStatus.PAID,
-          paidAt: { gte: startOfToday },
-        },
+        where: paidToday,
         _sum: { totalAmount: true },
       }),
       // 2. Today's Paid Orders Count
       this.prisma.order.count({
-        where: {
-          status: OrderStatus.PAID,
-          paidAt: { gte: startOfToday },
-        },
+        where: paidToday,
       }),
       // 3. Active Orders Count (Pending + Preparing)
       this.prisma.order.count({
@@ -68,10 +67,7 @@ export class ReportsService {
       this.prisma.orderItem.groupBy({
         by: ['menuItemId', 'menuNameSnapshot'],
         where: {
-          order: {
-            status: OrderStatus.PAID,
-            paidAt: { gte: startOfToday },
-          },
+          order: paidToday,
         },
         _sum: {
           quantity: true,
@@ -129,15 +125,18 @@ export class ReportsService {
    * Admin: Get Revenue and Order Summary
    */
   async getRevenueReport(query: QueryRevenueDto) {
-    const where: Prisma.OrderWhereInput = {
-      status: OrderStatus.PAID,
-    };
-
-    if (query.startDate || query.endDate) {
-      where.createdAt = {};
-      if (query.startDate) where.createdAt.gte = new Date(query.startDate);
-      if (query.endDate) where.createdAt.lte = new Date(query.endDate);
-    }
+    const range = toBranchDateRange(query.startDate, query.endDate);
+    // Revenue is recognised when paid (paidAt); the status breakdown covers orders created in range
+    const where = paidOrderWhere(range);
+    const createdInRange: Prisma.OrderWhereInput =
+      range.from || range.to
+        ? {
+            createdAt: {
+              ...(range.from ? { gte: range.from } : {}),
+              ...(range.to ? { lte: range.to } : {}),
+            },
+          }
+        : {};
 
     const [aggregate, totalOrders, ordersByStatus] = await Promise.all([
       this.prisma.order.aggregate({
@@ -149,6 +148,7 @@ export class ReportsService {
       this.prisma.order.count({ where }),
       this.prisma.order.groupBy({
         by: ['status'],
+        where: createdInRange,
         _count: {
           id: true,
         },
@@ -174,15 +174,9 @@ export class ReportsService {
    */
   async getTopSelling(query: QueryTopSellingDto) {
     const limit = query.limit ?? 5;
-    const orderWhere: Prisma.OrderWhereInput = {
-      status: OrderStatus.PAID,
-    };
-
-    if (query.startDate || query.endDate) {
-      orderWhere.createdAt = {};
-      if (query.startDate) orderWhere.createdAt.gte = new Date(query.startDate);
-      if (query.endDate) orderWhere.createdAt.lte = new Date(query.endDate);
-    }
+    const orderWhere = paidOrderWhere(
+      toBranchDateRange(query.startDate, query.endDate),
+    );
 
     const items = await this.prisma.orderItem.groupBy({
       by: ['menuItemId', 'menuNameSnapshot'],

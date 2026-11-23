@@ -13,6 +13,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { OrdersService } from './orders.service';
+import type { OrderActor } from './orders.service';
 import {
   CreateOrderDto,
   UpdateOrderStatusDto,
@@ -20,6 +21,7 @@ import {
 } from './dto/order.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Orders')
 @Controller()
@@ -69,11 +71,13 @@ export class OrdersController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Staff update order status (Kitchen / Cashier / Waiter)' })
   @ApiResponse({ status: 200, description: 'Order status updated' })
+  @ApiResponse({ status: 403, description: 'PAID / CANCELLED require ADMIN or CASHIER' })
   @ApiResponse({ status: 404, description: 'Order not found' })
   async updateOrderStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
+    @CurrentUser() user: OrderActor,
   ) {
-    return this.ordersService.updateStatus(id, dto);
+    return this.ordersService.updateStatus(id, dto, user);
   }
 }

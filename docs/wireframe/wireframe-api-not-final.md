@@ -5,6 +5,11 @@
 > **Backend Tech**: NestJS, PostgreSQL, Prisma ORM, Zod Validation  
 > **Security Tech**: JWT Dual Token (Admin), Guest Table-Session Token (Customer), Payload Encryption Handshake (AES-256-GCM)
 
+> [!WARNING]
+> **Draf awal, bukan kontrak API.** Dokumen ini tidak lagi diperbarui (sejak 2026-11-23) dan bisa berbeda dari kode, misalnya update banner, kategori, menu, status menu, dan status order ditulis `PATCH`, padahal backend menerima `PUT` maupun `PATCH` dan FE memakai `PUT`. Rujukan aktif:
+> - [frontend-integration-guide.md](../integration/frontend-integration-guide.md): alur, format respons & error, katalog endpoint.
+> - [api-contract-and-security-guidelines.md](../architecture/api-contract-and-security-guidelines.md): matriks method, path, dan role per endpoint.
+
 ---
 
 ## 🌐 Endpoints API Wireframe

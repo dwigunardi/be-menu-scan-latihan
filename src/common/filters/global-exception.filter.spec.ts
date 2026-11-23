@@ -88,4 +88,28 @@ describe('GlobalExceptionFilter', () => {
       }),
     );
   });
+
+  it('passes through a machine-readable code from an HttpException body', () => {
+    const exception = new HttpException(
+      { error: 'Conflict', code: 'SHIFT_NOT_OPEN', message: 'Belum ada shift' },
+      HttpStatus.CONFLICT,
+    );
+
+    filter.catch(exception, mockHost);
+
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: 'SHIFT_NOT_OPEN',
+        message: 'Belum ada shift',
+      }),
+    );
+  });
+
+  it('omits code when the exception has none', () => {
+    filter.catch(new HttpException('Forbidden', HttpStatus.FORBIDDEN), mockHost);
+
+    expect(mockResponse.json.mock.calls[0][0]).not.toHaveProperty('code');
+  });
 });

@@ -3,17 +3,30 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
+import { OrderPaymentService } from './order-payment.service';
 import {
   CreateOrderDto,
   QueryOrderDto,
   UpdateOrderStatusDto,
 } from './dto/order.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+
+export interface OrderActor {
+  id: string;
+  role: UserRole;
+}
+
+/** Target statuses only some roles may set. Others (PENDING, PREPARING, SERVED) are open to all staff roles. */
+export const RESTRICTED_STATUS_ROLES: Partial<Record<string, UserRole[]>> = {
+  PAID: [UserRole.ADMIN, UserRole.CASHIER],
+  CANCELLED: [UserRole.ADMIN, UserRole.CASHIER],
+};
 
 export const OrderStatus = {
   PENDING: 'PENDING',
@@ -30,6 +43,7 @@ export class OrdersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly orderPaymentService: OrderPaymentService,
     @Optional() private readonly eventsGateway?: EventsGateway,
   ) {}
 
@@ -270,7 +284,15 @@ export class OrdersService {
   /**
    * Admin / Staff: Update order status (PENDING -> PAID -> PREPARING -> SERVED / CANCELLED)
    */
-  async updateStatus(id: string, dto: UpdateOrderStatusDto) {
+  async updateStatus(id: string, dto: UpdateOrderStatusDto, actor: OrderActor) {
+    // Taking money and cancelling are cashier decisions; kitchen and waiters move orders through preparation
+    const allowedRoles = RESTRICTED_STATUS_ROLES[dto.status];
+    if (allowedRoles && !allowedRoles.includes(actor.role)) {
+      throw new ForbiddenException(
+        `Hanya Admin atau Kasir yang dapat mengubah status order menjadi ${dto.status}`,
+      );
+    }
+
     const existing = await this.prisma.order.findUnique({
       where: { id },
     });
@@ -279,19 +301,22 @@ export class OrdersService {
       throw new NotFoundException(`Order with ID ${id} not found`);
     }
 
+    // Payments go through the single payment entry point (write-once paidAt, cash requires open shift).
+    // Without an explicit method, re-confirming an already paid order keeps its method (idempotent).
+    if (dto.status === OrderStatus.PAID) {
+      const method = dto.paymentMethod ?? existing.paymentMethod ?? 'CASH';
+      const { order } = await this.orderPaymentService.markPaid(
+        id,
+        method,
+        'CASHIER',
+        { receivedById: actor.id },
+      );
+      return order;
+    }
+
     const data: Prisma.OrderUpdateInput = {
       status: dto.status,
     };
-
-    if (dto.status === OrderStatus.PAID) {
-      data.paidAt = new Date();
-      if (existing.tableId) {
-        await this.prisma.table.update({
-          where: { id: existing.tableId },
-          data: { status: 'WAITING_CLEANUP' as any },
-        });
-      }
-    }
 
     const updated = await this.prisma.order.update({
       where: { id },
@@ -307,9 +332,6 @@ export class OrdersService {
 
     // Real-Time WebSocket Alerts
     if (this.eventsGateway) {
-      if (dto.status === OrderStatus.PAID) {
-        this.eventsGateway.emitNewPaidOrder(updated);
-      }
       this.eventsGateway.emitOrderStatusChanged(updated, updated.table?.number);
     }
 

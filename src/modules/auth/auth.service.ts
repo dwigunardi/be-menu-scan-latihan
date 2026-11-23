@@ -11,9 +11,16 @@ import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EcdhService } from '../../common/crypto/ecdh.service';
+import { PinVerificationService } from '../../common/security/pin-verification.service';
 import { HandshakeDto } from './dto/handshake.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
+import { VerifyPinDto, VerifyPinResponse } from './dto/verify-pin.dto';
+
+export {
+  PIN_MAX_ATTEMPTS,
+  PIN_LOCK_MINUTES,
+} from '../../common/security/pin-verification.service';
 
 @Injectable()
 export class AuthService {
@@ -24,6 +31,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly ecdhService: EcdhService,
+    private readonly pinVerification: PinVerificationService,
   ) {}
 
   /**
@@ -291,6 +299,35 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
+  }
+
+  /**
+   * Verifies the logged-in user's own PIN (kiosk exit). A wrong PIN is `{ valid: false }`, never 401,
+   * because 401 means an expired session to the FE. Lockout (429) is shared with clock-in/out, see
+   * PinVerificationService.
+   */
+  async verifyPin(userId: string, dto: VerifyPinDto): Promise<VerifyPinResponse> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        pinCode: true,
+        isActive: true,
+        pinFailedAttempts: true,
+        pinLockedUntil: true,
+      },
+    });
+
+    if (!user || !user.isActive || !user.pinCode) {
+      return { valid: false };
+    }
+
+    const valid = await this.pinVerification.verify(
+      { ...user, pinCode: user.pinCode },
+      dto.pinCode,
+      'KIOSK_EXIT',
+    );
+    return { valid };
   }
 
   /**

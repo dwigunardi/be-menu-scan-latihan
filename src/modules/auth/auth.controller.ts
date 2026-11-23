@@ -16,6 +16,8 @@ import { HandshakeDto } from './dto/handshake.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
+import { VerifyPinDto, VerifyPinResponseSchema } from './dto/verify-pin.dto';
+import { ZodResponse } from '../../common/decorators/zod-response.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipEncryption } from '../../common/decorators/skip-encryption.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -80,6 +82,27 @@ export class AuthController {
     @Body() dto: OnboardStaffDto,
   ) {
     return this.authService.onboard(userId, dto);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('verify-pin')
+  @HttpCode(HttpStatus.OK)
+  @ZodResponse(VerifyPinResponseSchema)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Verify the logged-in staff PIN (kiosk exit)',
+    description:
+      'Checks the PIN of the user in the JWT (not one from the body). Wrong PIN returns 200 { valid: false }. ' +
+      'Locks PIN verification for 5 minutes after 5 consecutive failures.',
+  })
+  @ApiResponse({ status: 200, description: '{ valid: true } or { valid: false }' })
+  @ApiResponse({ status: 400, description: 'PIN is not 4 digits' })
+  @ApiResponse({ status: 429, description: 'Too many failed attempts (locked) or rate limited' })
+  async verifyPin(
+    @CurrentUser('id') userId: string,
+    @Body() dto: VerifyPinDto,
+  ) {
+    return this.authService.verifyPin(userId, dto);
   }
 
   @AllowDuringOnboarding()

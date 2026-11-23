@@ -26,6 +26,7 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { ShiftsModule } from './modules/shifts/shifts.module';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -59,6 +60,7 @@ import { AppService } from './app.service';
     StaffModule,
     AttendanceModule,
     SettingsModule,
+    ShiftsModule,
   ],
   controllers: [AppController],
   providers: [

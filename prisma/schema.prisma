@@ -48,10 +48,31 @@ enum LeaveType {
   OTHER
 }
 
+enum OvertimeReviewStatus {
+  APPROVED   // Computed overtime accepted as-is
+  REJECTED   // No overtime granted
+  OVERRIDDEN // Admin granted a different number of minutes
+}
+
 enum LeaveStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+enum PaymentMethod {
+  CASH
+  QRIS
+}
+
+enum PaymentSource {
+  CASHIER // Recorded by staff at the POS
+  GATEWAY // Recorded by the payment gateway webhook
+}
+
+enum CashierShiftStatus {
+  OPEN
+  CLOSED
 }
 
 /// Admin User Model for Authentication & Session Management
@@ -64,6 +85,8 @@ model User {
   phone           String?   @unique
   role            UserRole  @default(ADMIN)
   pinCode         String?   @map("pin_code") // Hashed 4-digit PIN for clock-in
+  pinFailedAttempts Int     @default(0) @map("pin_failed_attempts") // Consecutive wrong PINs on /auth/verify-pin
+  pinLockedUntil  DateTime? @map("pin_locked_until") // PIN verification refused (429) until this time
   needsOnboarding Boolean   @default(true) @map("needs_onboarding")
   dailyShiftHours Int       @default(8) @map("daily_shift_hours")
   isActive        Boolean   @default(true) @map("is_active")
@@ -75,8 +98,13 @@ model User {
   deletedAt       DateTime? @map("deleted_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
-  attendances     Attendance[]
+  attendances     Attendance[]   @relation("AttendanceStaff")
+  reviewedOvertimes Attendance[] @relation("OvertimeReviewedBy")
+  correctedAttendances Attendance[] @relation("AttendanceCorrectedBy")
   leaveRequests   LeaveRequest[]
+  openedShifts    CashierShift[] @relation("ShiftOpenedBy")
+  closedShifts    CashierShift[] @relation("ShiftClosedBy")
+  receivedPayments Payment[]    @relation("PaymentReceivedBy")
 
   @@index([role, isActive, deletedAt])
   @@index([employeeId])
@@ -219,13 +247,16 @@ model Order {
   status       OrderStatus @default(PENDING)
   totalAmount  Decimal     @db.Decimal(10, 2) @map("total_amount")
   orderItems   OrderItem[]
-  paidAt       DateTime?   @map("paid_at")
+  payments     Payment[]
+  paidAt       DateTime?   @map("paid_at") // Denormalized from the first Payment; written once
+  paymentMethod PaymentMethod? @map("payment_method") // Denormalized from the first Payment
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
   @@index([tableId])
   @@index([status])
   @@index([createdAt])
+  @@index([status, paidAt])
   @@map("orders")
 }
 
@@ -293,7 +324,7 @@ model Attendance {
   id                    String            @id @default(uuid())
   branchId              String            @default("default-branch") @map("branch_id")
   staffId               String            @map("staff_id")
-  staff                 User              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  staff                 User              @relation("AttendanceStaff", fields: [staffId], references: [id], onDelete: Cascade)
   date                  String            // Format: YYYY-MM-DD
   clockInTime           DateTime?         @map("clock_in_time")
   clockOutTime          DateTime?         @map("clock_out_time")
@@ -303,6 +334,22 @@ model Attendance {
   clockInDistanceMeters Float?            @map("clock_in_distance_meters")
   isWithinGeofence      Boolean           @default(true) @map("is_within_geofence")
   workDurationMinutes   Int?              @map("work_duration_minutes")
+  /// Minutes worked beyond the staff's dailyShiftHours, computed at clock-out and on correction
+  overtimeMinutes       Int?              @map("overtime_minutes")
+  /// Admin decision on the overtime; null = pending review
+  overtimeReviewStatus  OvertimeReviewStatus? @map("overtime_review_status")
+  /// Minutes granted: computed minutes when APPROVED, 0 when REJECTED, the admin's value when OVERRIDDEN
+  approvedOvertimeMinutes Int?            @map("approved_overtime_minutes")
+  overtimeReviewedById  String?           @map("overtime_reviewed_by_id")
+  overtimeReviewedBy    User?             @relation("OvertimeReviewedBy", fields: [overtimeReviewedById], references: [id])
+  overtimeReviewedAt    DateTime?         @map("overtime_reviewed_at")
+  overtimeNotes         String?           @map("overtime_notes")
+  /// Last admin correction of the clock-out time (audit trail)
+  correctedById         String?           @map("corrected_by_id")
+  correctedBy           User?             @relation("AttendanceCorrectedBy", fields: [correctedById], references: [id])
+  correctedAt           DateTime?         @map("corrected_at")
+  correctionNotes       String?           @map("correction_notes")
+  originalClockOutTime  DateTime?         @map("original_clock_out_time") // Clock-out before the first correction
   notes                 String?
   leaveType             LeaveType?        @map("leave_type")
   leaveStatus           LeaveStatus?      @map("leave_status")
@@ -350,4 +397,66 @@ model ShiftTemplate {
 
   @@index([branchId])
   @@map("shift_templates")
+}
+
+/// Cashier Shift (cash drawer session) with opening float, live totals and Z-Report snapshot on close.
+/// Revenue is attributed to a shift through Payment.shiftId (the shift open when the payment was received).
+model CashierShift {
+  id               String             @id @default(uuid())
+  branchId         String             @default("default-branch") @map("branch_id")
+  staffId          String             @map("staff_id") // Cashier who opened the shift
+  staff            User               @relation("ShiftOpenedBy", fields: [staffId], references: [id])
+  closedById       String?            @map("closed_by_id")
+  closedBy         User?              @relation("ShiftClosedBy", fields: [closedById], references: [id])
+  status           CashierShiftStatus @default(OPEN)
+  /// Equals branchId while OPEN and NULL once CLOSED. The unique constraint guarantees
+  /// at most one open shift (one cash drawer) per branch, even under concurrent requests.
+  openLockKey      String?            @unique @map("open_lock_key")
+  openingCash      Decimal            @db.Decimal(12, 2) @map("opening_cash")
+  expectedCash     Decimal?           @db.Decimal(12, 2) @map("expected_cash")
+  actualCash       Decimal?           @db.Decimal(12, 2) @map("actual_cash")
+  cashVariance     Decimal?           @db.Decimal(12, 2) @map("cash_variance")
+  totalCashOrders  Int                @default(0) @map("total_cash_orders")
+  totalQrisOrders  Int                @default(0) @map("total_qris_orders")
+  totalCashRevenue Decimal            @default(0) @db.Decimal(12, 2) @map("total_cash_revenue")
+  totalQrisRevenue Decimal            @default(0) @db.Decimal(12, 2) @map("total_qris_revenue")
+  totalRevenue     Decimal            @default(0) @db.Decimal(12, 2) @map("total_revenue")
+  openingNotes     String?            @map("opening_notes")
+  closingNotes     String?            @map("closing_notes")
+  openedAt         DateTime           @default(now()) @map("opened_at")
+  closedAt         DateTime?          @map("closed_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  payments         Payment[]
+
+  @@index([branchId, status])
+  @@index([openedAt])
+  @@index([staffId])
+  @@map("cashier_shifts")
+}
+
+/// Payment ledger: one row per payment received, written by OrderPaymentService.markPaid in the same
+/// transaction that marks the order paid. Order.paidAt / paymentMethod are a denormalized summary.
+model Payment {
+  id           String        @id @default(uuid())
+  orderId      String        @map("order_id")
+  order        Order         @relation(fields: [orderId], references: [id])
+  /// Cashier shift open when the payment was received. Always set for CASH; null for a gateway
+  /// payment received while no shift was open.
+  shiftId      String?       @map("shift_id")
+  shift        CashierShift? @relation(fields: [shiftId], references: [id])
+  method       PaymentMethod
+  source       PaymentSource
+  amount       Decimal       @db.Decimal(12, 2)
+  /// Gateway transaction id. Unique so the same gateway transaction can never be recorded twice.
+  providerRef  String?       @unique @map("provider_ref")
+  receivedById String?       @map("received_by_id") // Staff who took the payment (CASHIER source)
+  receivedBy   User?         @relation("PaymentReceivedBy", fields: [receivedById], references: [id])
+  paidAt       DateTime      @map("paid_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([shiftId, method])
+  @@index([paidAt])
+  @@map("payments")
 }

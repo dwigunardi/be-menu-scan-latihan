@@ -27,6 +27,8 @@ export class CreateOrderDto extends createZodDto(CreateOrderSchema) {}
 
 export const UpdateOrderStatusSchema = z.object({
   status: z.enum(['PENDING', 'PREPARING', 'SERVED', 'PAID', 'CANCELLED']),
+  // Only used when status becomes PAID. Counter payments default to CASH (cash drawer reconciliation).
+  paymentMethod: z.enum(['CASH', 'QRIS']).optional(),
 });
 
 export class UpdateOrderStatusDto extends createZodDto(UpdateOrderStatusSchema) {}

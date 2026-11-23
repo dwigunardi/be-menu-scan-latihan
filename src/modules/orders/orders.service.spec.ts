@@ -2,12 +2,21 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersService, OrderStatus } from './orders.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
+import { OrderPaymentService } from './order-payment.service';
+import {
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { UserRole } from '@prisma/client';
 
 describe('OrdersService', () => {
+  const cashier = { id: 'cashier-1', role: UserRole.CASHIER };
+  const kitchen = { id: 'kitchen-1', role: UserRole.KITCHEN };
   let service: OrdersService;
   let prismaService: any;
   let eventsGateway: any;
+  let orderPaymentService: any;
 
   const mockTable = {
     id: 'table-123',
@@ -62,11 +71,16 @@ describe('OrdersService', () => {
       emitOrderStatusChanged: jest.fn(),
     };
 
+    orderPaymentService = {
+      markPaid: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OrdersService,
         { provide: PrismaService, useValue: prismaService },
         { provide: EventsGateway, useValue: eventsGateway },
+        { provide: OrderPaymentService, useValue: orderPaymentService },
       ],
     }).compile();
 
@@ -192,36 +206,136 @@ describe('OrdersService', () => {
         status: OrderStatus.PREPARING,
       });
 
-      const result = await service.updateStatus('order-123', {
-        status: OrderStatus.PREPARING,
-      });
+      const result = await service.updateStatus(
+        'order-123',
+        { status: OrderStatus.PREPARING },
+        kitchen,
+      );
 
       expect(result.status).toBe(OrderStatus.PREPARING);
       expect(eventsGateway.emitOrderStatusChanged).toHaveBeenCalled();
     });
 
-    it('should set paidAt and emit paid event when status becomes PAID', async () => {
+    it('should delegate PAID to the payment entry point, defaulting to CASH', async () => {
+      const paid = { ...mockOrder, status: OrderStatus.PAID, paidAt: new Date() };
       prismaService.order.findUnique.mockResolvedValue(mockOrder);
-      prismaService.table.update.mockResolvedValue(mockTable);
-      prismaService.order.update.mockResolvedValue({
-        ...mockOrder,
-        status: OrderStatus.PAID,
-        paidAt: new Date(),
-      });
+      orderPaymentService.markPaid.mockResolvedValue({ order: paid, alreadyPaid: false });
 
-      const result = await service.updateStatus('order-123', {
-        status: OrderStatus.PAID,
-      });
+      const result = await service.updateStatus(
+        'order-123',
+        { status: OrderStatus.PAID },
+        cashier,
+      );
 
-      expect(result.status).toBe(OrderStatus.PAID);
-      expect(eventsGateway.emitNewPaidOrder).toHaveBeenCalled();
+      expect(result).toBe(paid);
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'CASH', 'CASHIER', {
+        receivedById: 'cashier-1',
+      });
+      // markPaid owns the write, table status and events
+      expect(prismaService.order.update).not.toHaveBeenCalled();
+      expect(eventsGateway.emitOrderStatusChanged).not.toHaveBeenCalled();
     });
+
+    it('should pass an explicit paymentMethod through', async () => {
+      prismaService.order.findUnique.mockResolvedValue(mockOrder);
+      orderPaymentService.markPaid.mockResolvedValue({ order: mockOrder, alreadyPaid: false });
+
+      await service.updateStatus(
+        'order-123',
+        { status: OrderStatus.PAID, paymentMethod: 'QRIS' },
+        cashier,
+      );
+
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER', {
+        receivedById: 'cashier-1',
+      });
+    });
+
+    it('should keep the existing method when re-confirming an already paid order', async () => {
+      prismaService.order.findUnique.mockResolvedValue({
+        ...mockOrder,
+        paidAt: new Date(),
+        paymentMethod: 'QRIS',
+      });
+      orderPaymentService.markPaid.mockResolvedValue({ order: mockOrder, alreadyPaid: true });
+
+      await service.updateStatus('order-123', { status: OrderStatus.PAID }, cashier);
+
+      expect(orderPaymentService.markPaid).toHaveBeenCalledWith('order-123', 'QRIS', 'CASHIER', {
+        receivedById: 'cashier-1',
+      });
+    });
+
+    it('should not touch payment for non-payment status changes', async () => {
+      prismaService.order.findUnique.mockResolvedValue(mockOrder);
+      prismaService.order.update.mockResolvedValue({ ...mockOrder, status: OrderStatus.SERVED });
+
+      await service.updateStatus('order-123', { status: OrderStatus.SERVED }, kitchen);
+
+      expect(orderPaymentService.markPaid).not.toHaveBeenCalled();
+      expect(prismaService.order.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: OrderStatus.SERVED } }),
+      );
+    });
+
+    it.each([
+      [UserRole.KITCHEN, OrderStatus.PAID],
+      [UserRole.WAITER, OrderStatus.PAID],
+      [UserRole.KITCHEN, OrderStatus.CANCELLED],
+      [UserRole.WAITER, OrderStatus.CANCELLED],
+    ])('should forbid %s from setting %s', async (role, status) => {
+      prismaService.order.findUnique.mockResolvedValue(mockOrder);
+
+      await expect(
+        service.updateStatus('order-123', { status }, { id: 'u1', role }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(orderPaymentService.markPaid).not.toHaveBeenCalled();
+      expect(prismaService.order.update).not.toHaveBeenCalled();
+    });
+
+    it.each([UserRole.ADMIN, UserRole.CASHIER])(
+      'should let %s cancel an order',
+      async (role) => {
+        prismaService.order.findUnique.mockResolvedValue(mockOrder);
+        prismaService.order.update.mockResolvedValue({
+          ...mockOrder,
+          status: OrderStatus.CANCELLED,
+        });
+
+        await service.updateStatus(
+          'order-123',
+          { status: OrderStatus.CANCELLED },
+          { id: 'u1', role },
+        );
+
+        expect(prismaService.order.update).toHaveBeenCalled();
+      },
+    );
+
+    it.each([UserRole.KITCHEN, UserRole.WAITER])(
+      'should let %s move an order through preparation',
+      async (role) => {
+        prismaService.order.findUnique.mockResolvedValue(mockOrder);
+        prismaService.order.update.mockResolvedValue({
+          ...mockOrder,
+          status: OrderStatus.SERVED,
+        });
+
+        await service.updateStatus(
+          'order-123',
+          { status: OrderStatus.SERVED },
+          { id: 'u1', role },
+        );
+
+        expect(prismaService.order.update).toHaveBeenCalled();
+      },
+    );
 
     it('should throw NotFoundException if order to update not found', async () => {
       prismaService.order.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.updateStatus('invalid-order', { status: OrderStatus.SERVED }),
+        service.updateStatus('invalid-order', { status: OrderStatus.SERVED }, kitchen),
       ).rejects.toThrow(NotFoundException);
     });
   });
