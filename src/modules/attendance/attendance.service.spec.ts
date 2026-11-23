@@ -782,4 +782,90 @@ describe('AttendanceService', () => {
       });
     });
   });
+
+  describe('getKioskRoster', () => {
+    beforeEach(() => {
+      prisma.user.findMany = jest.fn();
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      // 01:30 WIB on 21 Nov (still 20 Nov in UTC)
+      jest.setSystemTime(new Date('2026-11-20T18:30:00.000Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    const staffRows = [
+      { id: 'admin-1', employeeId: 'KC-001', name: 'Ayu Admin', role: UserRole.ADMIN, avatarUrl: null, pinCode: 'hash-a' },
+      { id: 'staff-1', employeeId: 'KC-002', name: 'Budi Kasir', role: UserRole.CASHIER, avatarUrl: '/uploads/b.webp', pinCode: 'hash-b' },
+      { id: 'staff-2', employeeId: null, name: 'Citra Dapur', role: UserRole.KITCHEN, avatarUrl: null, pinCode: null },
+    ];
+
+    it('lists active onboarded staff (ADMIN included) with today WIB attendance and no contact details', async () => {
+      prisma.user.findMany.mockResolvedValue(staffRows);
+      prisma.attendance.findMany.mockResolvedValue([
+        {
+          id: 'att-1',
+          staffId: 'staff-1',
+          clockInTime: new Date('2026-11-21T01:05:00.000Z'),
+          clockOutTime: null,
+          status: AttendanceStatus.ON_TIME,
+        },
+      ]);
+
+      const roster = await service.getKioskRoster();
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { isActive: true, deletedAt: null, needsOnboarding: false },
+          orderBy: { name: 'asc' },
+        }),
+      );
+      // Roles are not filtered: ADMIN shows on the kiosk too
+      expect(prisma.user.findMany.mock.calls[0][0].where).not.toHaveProperty('role');
+      expect(prisma.attendance.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { date: '2026-11-21', staffId: { in: ['admin-1', 'staff-1', 'staff-2'] } },
+        }),
+      );
+      expect(roster).toEqual([
+        { id: 'admin-1', employeeId: 'KC-001', name: 'Ayu Admin', role: 'ADMIN', avatarUrl: null, hasPin: true, today: null },
+        {
+          id: 'staff-1',
+          employeeId: 'KC-002',
+          name: 'Budi Kasir',
+          role: 'CASHIER',
+          avatarUrl: '/uploads/b.webp',
+          hasPin: true,
+          today: {
+            attendanceId: 'att-1',
+            clockInTime: '2026-11-21T01:05:00.000Z',
+            clockOutTime: null,
+            status: 'ON_TIME',
+          },
+        },
+        { id: 'staff-2', employeeId: null, name: 'Citra Dapur', role: 'KITCHEN', avatarUrl: null, hasPin: false, today: null },
+      ]);
+    });
+
+    it('never exposes the PIN hash, email or phone', async () => {
+      prisma.user.findMany.mockResolvedValue(staffRows);
+      prisma.attendance.findMany.mockResolvedValue([]);
+
+      const roster = await service.getKioskRoster();
+
+      for (const item of roster) {
+        expect(item).not.toHaveProperty('pinCode');
+        expect(item).not.toHaveProperty('email');
+        expect(item).not.toHaveProperty('phone');
+      }
+      const select = prisma.user.findMany.mock.calls[0][0].select;
+      expect(select).not.toHaveProperty('email');
+      expect(select).not.toHaveProperty('phone');
+    });
+
+    it('skips the attendance query when there is no staff', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
+
+      await expect(service.getKioskRoster()).resolves.toEqual([]);
+      expect(prisma.attendance.findMany).not.toHaveBeenCalled();
+    });
+  });
 });

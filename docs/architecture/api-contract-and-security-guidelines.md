@@ -165,6 +165,7 @@ Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan di
 | **Auth** | `POST` | `/api/v1/auth/verify-pin` | All Roles | Verifikasi PIN milik user JWT untuk keluar mode kiosk. `200 { valid }`, tidak pernah `401`; terkunci `429` setelah 5x salah (lockout dibagi dengan clock-in/out). |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/clock-in` | All Roles | Presensi masuk staf dengan verifikasi 4-digit PIN & geofence GPS. PIN terkunci $\rightarrow$ `429`. |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/clock-out` | All Roles | Presensi pulang staf; hitung durasi kerja dan menit lembur. PIN terkunci $\rightarrow$ `429`. |
+| **Attendance** | `GET` | `/api/v1/admin/attendance/kiosk-roster` | `ADMIN`, `CASHIER` | Daftar staf untuk kiosk presensi (termasuk ADMIN) dengan `hasPin` dan presensi WIB hari ini; tanpa email/telepon. |
 | **Attendance** | `GET` | `/api/v1/admin/attendance` | `ADMIN` | Listing log presensi seluruh staf dengan filter & pagination. |
 | **Attendance** | `GET` | `/api/v1/admin/attendance/summary` | `ADMIN` | KPI summary harian WIB (hadir, tepat waktu, telat, pulang awal, cuti, absen, % kehadiran). |
 | **Attendance** | `POST` | `/api/v1/admin/attendance/leave` | `ADMIN` | Pengajuan izin / sakit resmi staf. |

@@ -110,6 +110,7 @@ Semua endpoint presensi berada di bawah `/api/v1/admin/attendance` dan mengembal
 ### A. Kiosk Presensi (semua role)
 | Endpoint | Method | Role | Payload Request | Deskripsi |
 | :--- | :---: | :---: | :--- | :--- |
+| `/api/v1/admin/attendance/kiosk-roster` | `GET` | `ADMIN`, `CASHIER` | - | Daftar staf aktif yang sudah onboarding (termasuk ADMIN) untuk grid kiosk: `[{ id, employeeId, name, role, avatarUrl, hasPin, today: null | { attendanceId, clockInTime, clockOutTime, status } }]`. Tanpa email/telepon. |
 | `/api/v1/admin/attendance/clock-in` | `POST` | `ADMIN`, `CASHIER`, `KITCHEN`, `WAITER` | `{ staffId, pinCode, latitude, longitude, notes? }` | Clock-in dengan verifikasi PIN dan geofence |
 | `/api/v1/admin/attendance/clock-out` | `POST` | `ADMIN`, `CASHIER`, `KITCHEN`, `WAITER` | `{ staffId, pinCode, latitude, longitude, notes? }` | Clock-out, hitung durasi kerja dan lembur |
 

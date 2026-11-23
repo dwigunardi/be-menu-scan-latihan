@@ -16,6 +16,7 @@ import { AttendanceCorrectionDto } from './dto/attendance-correction.dto';
 import {
   AttendanceItemResponse,
   AttendanceSummaryResponse,
+  KioskRosterItem,
 } from './dto/attendance-response.dto';
 import { calculateHaversineDistance } from './utils/geofence.util';
 import {
@@ -469,6 +470,63 @@ export class AttendanceService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  /**
+   * Daftar staf untuk kiosk presensi (ADMIN & CASHIER): staf aktif yang sudah onboarding, termasuk ADMIN,
+   * beserta presensi hari ini (tanggal WIB). Tidak memuat email/telepon, sehingga kasir tidak perlu akses
+   * ke /admin/staff maupun /admin/attendance yang khusus ADMIN.
+   */
+  async getKioskRoster(): Promise<KioskRosterItem[]> {
+    const today = this.getTodayString();
+
+    const staff = await this.prisma.user.findMany({
+      where: { isActive: true, deletedAt: null, needsOnboarding: false },
+      select: {
+        id: true,
+        employeeId: true,
+        name: true,
+        role: true,
+        avatarUrl: true,
+        pinCode: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const attendances = staff.length
+      ? await this.prisma.attendance.findMany({
+          where: { date: today, staffId: { in: staff.map((s) => s.id) } },
+          select: {
+            id: true,
+            staffId: true,
+            clockInTime: true,
+            clockOutTime: true,
+            status: true,
+          },
+        })
+      : [];
+    const byStaff = new Map(attendances.map((a) => [a.staffId, a]));
+
+    return staff.map((s) => {
+      const record = byStaff.get(s.id);
+      return {
+        id: s.id,
+        employeeId: s.employeeId,
+        name: s.name,
+        role: s.role,
+        avatarUrl: s.avatarUrl,
+        // Only whether a PIN exists; the hash itself never leaves the service
+        hasPin: s.pinCode !== null,
+        today: record
+          ? {
+              attendanceId: record.id,
+              clockInTime: record.clockInTime?.toISOString() ?? null,
+              clockOutTime: record.clockOutTime?.toISOString() ?? null,
+              status: record.status,
+            }
+          : null,
+      };
+    });
   }
 
   /**

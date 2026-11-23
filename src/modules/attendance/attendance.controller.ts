@@ -25,6 +25,7 @@ import {
   AttendanceItemResponseSchema,
   AttendancePaginatedResponseSchema,
   AttendanceSummaryResponseSchema,
+  KioskRosterResponseSchema,
   LeaveResponseSchema,
 } from './dto/attendance-response.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -70,6 +71,19 @@ export class AttendanceController {
   @ApiResponse({ status: 200, description: 'Paginated attendance list' })
   async getAttendancePaginated(@Query() query: AttendanceQueryDto) {
     return this.attendanceService.getAttendancePaginated(query);
+  }
+
+  @Get('kiosk-roster')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER)
+  @ZodResponse(KioskRosterResponseSchema)
+  @ApiOperation({
+    summary: 'Daftar Staf Kiosk Presensi beserta Status Hari Ini',
+    description:
+      'Staf aktif yang sudah onboarding (termasuk ADMIN), field minimal tanpa email/telepon, dengan presensi tanggal WIB hari ini. Untuk tablet kiosk yang dibuka kasir.',
+  })
+  @ApiResponse({ status: 200, description: '[{ id, employeeId, name, role, avatarUrl, hasPin, today }]' })
+  async getKioskRoster() {
+    return this.attendanceService.getKioskRoster();
   }
 
   @Get('summary')

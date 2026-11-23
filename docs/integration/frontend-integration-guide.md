@@ -883,6 +883,7 @@ Update order, menu, kategori, banner, dan meja menerima `PUT` maupun `PATCH` den
 - **Upload Gambar** (`ADMIN`): `POST /api/v1/admin/uploads/image` (`multipart/form-data`, field `file`)
 
 **Presensi** (detail: [Staff & Attendance Blueprint](../architecture/staff-and-attendance-blueprint.md))
+- **Daftar Staf Kiosk** (`ADMIN`, `CASHIER`): `GET /api/v1/admin/attendance/kiosk-roster` $\rightarrow$ `[{ id, employeeId, name, role, avatarUrl, hasPin, today: null | { attendanceId, clockInTime, clockOutTime, status } }]`. Staf aktif yang sudah onboarding (termasuk ADMIN), tanpa email/telepon, dengan presensi tanggal WIB hari ini. Pakai ini di kiosk, bukan `/admin/staff` + `/admin/attendance` (keduanya khusus ADMIN).
 - **Clock-In / Clock-Out (kiosk)**: `POST /api/v1/admin/attendance/clock-in` | `clock-out` (`{ "staffId", "pinCode", "latitude", "longitude", "notes"? }`). PIN salah `400`, PIN terkunci `429`.
 - **Log Presensi**: `GET /api/v1/admin/attendance?page&limit&startDate&endDate&status&role&search` $\rightarrow$ `{ items: AttendanceItem[], meta }`
 - **Ringkasan Harian**: `GET /api/v1/admin/attendance/summary?date=YYYY-MM-DD`
