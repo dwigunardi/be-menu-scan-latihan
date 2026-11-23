@@ -51,6 +51,7 @@ Cookie `HttpOnly` tidak bisa dibaca JavaScript, sehingga refresh token tidak bis
 | :--- | :--- |
 | `POST /auth/login`, `POST /auth/onboard` | Mengirim `Set-Cookie: menuscan_rt=...`. Selama masa transisi `refreshToken` tetap ada di body; setelahnya dihapus dari body. |
 | `POST /auth/refresh` | Membaca refresh token dari **cookie lebih dulu**, lalu body/header hanya selama masa transisi. Body request tidak wajib lagi. Merespons `{ accessToken }` + `Set-Cookie` token baru (rotasi tetap). Gagal (`401`) → cookie dihapus. |
+| `POST /auth/handover` | Mengirim `Set-Cookie` berisi refresh token **staf pengganti** (menimpa cookie staf lama di perangkat itu). Refresh token staf lama sudah dicabut di BE oleh endpoint ini. Selama masa transisi `refreshToken` tetap ada di body. |
 | `POST /auth/logout` | Selalu menghapus cookie (`Max-Age=0`). Mencabut sesi dengan access token jika masih valid, **atau** dengan refresh cookie jika access token sudah kedaluwarsa, supaya logout tetap berhasil setelah tab lama ditinggal. |
 
 ### Perlindungan CSRF
@@ -103,7 +104,7 @@ Tahap 3 baru boleh dijalankan setelah FE Tahap 2 ter-deploy di semua perangkat (
 - `package.json`: `cookie-parser`, `@types/cookie-parser`; `src/main.ts`: `app.use(cookieParser())`.
 - `src/config/env.config.ts`: `REFRESH_TOKEN_TRANSPORT`, `REFRESH_COOKIE_SAMESITE` (validasi Zod; `none` memaksa `Secure`).
 - Helper baru (mis. `src/modules/auth/refresh-cookie.ts`): `setRefreshCookie(res, token)`, `clearRefreshCookie(res)`, opsi cookie dari env.
-- `auth.controller.ts`: login, onboard, refresh, logout memakai `@Res({ passthrough: true })` untuk menulis cookie; respons body tetap lewat `TransformInterceptor` dan enkripsi payload seperti sekarang (header `Set-Cookie` tidak terpengaruh enkripsi).
+- `auth.controller.ts`: login, onboard, refresh, logout, dan handover memakai `@Res({ passthrough: true })` untuk menulis cookie; respons body tetap lewat `TransformInterceptor` dan enkripsi payload seperti sekarang (header `Set-Cookie` tidak terpengaruh enkripsi).
 - `jwt-refresh.strategy.ts`: extractor membaca `req.cookies.menuscan_rt` lebih dulu; body/header hanya jika transport bukan `cookie`.
 - `refresh-token.dto.ts`: `refreshToken` menjadi opsional (Tahap 1), dihapus di Tahap 4.
 - Guard/cek kecil untuk `Origin` + `Content-Type` pada refresh & logout.
@@ -117,7 +118,7 @@ Tahap 3 baru boleh dijalankan setelah FE Tahap 2 ter-deploy di semua perangkat (
 - `use-auth-store.ts`: hapus `refreshToken` dari state, `setAuth`, `updateTokens`, dan `partialize`; saat rehydrate hapus field `refreshToken` lama dari `localStorage`.
 - `src/app/(auth)/login/page.tsx` dan `src/app/onboarding/page.tsx`: berhenti meneruskan `refreshToken` ke `setAuth` / `updateTokens`. Redaksi field `refreshToken` di `logger-middleware.ts` boleh tetap ada.
 - `pipeline-runner.ts` (`attemptSilentTokenRefresh`): tidak lagi mengecek `refreshToken` di store (cookie tidak terlihat JS), tetapi **tetap mensyaratkan `user` ada di store** sebagai tanda sesi FE aktif. Tanpa `user`, jangan refresh; langsung ke `/login`. Refresh `401` → modal login ulang.
-- `shift-handover-modal.tsx`: lihat temuan di bawah. Setelah migrasi, serah terima memanggil `logoutApi()` untuk kasir lama (mencabut hash refresh token-nya di BE) lalu login sebagai kasir pengganti, sehingga cookie berisi sesi kasir baru.
+- `shift-handover-modal.tsx`: memakai `POST /auth/handover` (lihat temuan di bawah) dengan `withCredentials`. Endpoint itu sudah mencabut refresh token staf lama dan, setelah Tahap 1, menulis cookie staf pengganti, jadi serah terima tidak perlu memanggil `logoutApi()` terpisah.
 - Koordinasi antar tab (bagian 7).
 
 > [!WARNING]
@@ -126,7 +127,11 @@ Tahap 3 baru boleh dijalankan setelah FE Tahap 2 ter-deploy di semua perangkat (
 > - backend membaca identitas dari JWT, jadi semua aksi setelah serah terima tetap tercatat atas nama kasir lama: `receivedById` pembayaran, pembuka/penutup shift, dan pemeriksaan role;
 > - tab "Magic Link" mengarah ke `/handover`, route yang tidak ada di FE.
 >
-> Serah terima perlu benar-benar mengautentikasi kasir pengganti (`POST /auth/login`, atau endpoint serah terima khusus berbasis PIN) dan memakai token hasilnya. Ini harus diperbaiki lebih dulu, tidak menunggu migrasi cookie. Pendekatannya menunggu keputusan user.
+> **Keputusan (2026-11-23): serah terima berbasis PIN lewat endpoint BE**, dikerjakan lebih dulu dan terpisah dari migrasi cookie (branch BE `feat/shift-handover-pin`):
+> - `GET /auth/handover/candidates` (semua role): staf aktif, sudah onboarding, punya PIN, bukan ADMIN, bukan user saat ini. Menggantikan `/admin/staff` (khusus ADMIN) yang membuat daftar kandidat kosong untuk kasir.
+> - `POST /auth/handover` `{ incomingStaffId, pinCode, notes? }`: verifikasi PIN staf pengganti (lockout bersama), cabut refresh token staf lama, terbitkan sesi staf pengganti dengan bentuk respons login. `409 SHIFT_STILL_OPEN` jika staf lama masih punya shift laci terbuka; penerima ADMIN ditolak.
+>
+> Akses token staf lama tetap berlaku sampai kedaluwarsa (maks. 15 menit, JWT stateless); FE harus langsung mengganti token di store dengan hasil serah terima.
 
 ## 7. Risiko & Mitigasi
 
@@ -149,8 +154,9 @@ Tahap 3 baru boleh dijalankan setelah FE Tahap 2 ter-deploy di semua perangkat (
 5. Dua tab dibiarkan sampai access token kedaluwarsa lalu dipakai bersamaan → keduanya tetap login (kunci antar tab).
 6. `POST /auth/refresh` dari origin lain → `403`.
 7. Logout dengan access token kedaluwarsa → sesi dicabut dan cookie dihapus.
-8. Logout dari setiap titik FE (header, keluar kiosk, refresh gagal, modal sesi habis) → `POST /auth/logout` terkirim dan cookie hilang. Setelah itu, membuka FE di perangkat yang sama tidak mendapatkan sesi apa pun.
-9. Mode `both`: FE lama (body) dan FE baru (cookie) sama-sama berjalan. Mode `cookie`: refresh lewat body ditolak.
+8. Serah terima → `Set-Cookie` berisi sesi staf pengganti; refresh dengan cookie staf lama (jika masih tersimpan di tempat lain) → `401`.
+9. Logout dari setiap titik FE (header, keluar kiosk, refresh gagal, modal sesi habis) → `POST /auth/logout` terkirim dan cookie hilang. Setelah itu, membuka FE di perangkat yang sama tidak mendapatkan sesi apa pun.
+10. Mode `both`: FE lama (body) dan FE baru (cookie) sama-sama berjalan. Mode `cookie`: refresh lewat body ditolak.
 
 ## 9. Di Luar Cakupan
 
