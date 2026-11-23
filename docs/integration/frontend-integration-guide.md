@@ -700,7 +700,7 @@ Format error (selalu plain JSON):
 }
 ```
 
-- `code` hanya ada pada error yang punya kode mesin. Saat ini: `SHIFT_NOT_OPEN` (bayar tunai tanpa shift kasir terbuka). Cek `code`, jangan teks `message`.
+- `code` hanya ada pada error yang punya kode mesin. Saat ini: `SHIFT_NOT_OPEN` (bayar tunai tanpa shift kasir terbuka) dan `SHIFT_STILL_OPEN` (serah terima saat staf yang keluar masih punya shift laci terbuka). Cek `code`, jangan teks `message`.
 - `details` hanya ada pada error validasi (`400`), berisi daftar `{ "field", "message" }` per field yang gagal.
 - `401` berarti sesi/token tidak valid (memicu refresh token). PIN salah **tidak pernah** dibalas `401`.
 - `429` berarti rate limit per IP (pesan "Terlalu banyak permintaan. Coba lagi dalam X detik." plus header `Retry-After` dalam detik), atau PIN staf sedang terkunci (pesan menyebut sisa menit). Tampilkan `message` dari backend apa adanya.
@@ -854,6 +854,8 @@ Jika data tidak cocok dengan schema, backend tidak gagal: respons tetap dikirim 
 - **Staff Logout**: `POST /api/v1/auth/logout`
 - **Staff Profile Me**: `GET /api/v1/auth/me`
 - **Onboarding Pertama Kali**: `POST /api/v1/auth/onboard` (`{ "currentPassword", "newPassword", "pinCode" }`)
+- **Kandidat Serah Terima Shift**: `GET /api/v1/auth/handover/candidates` $\rightarrow$ `[{ id, employeeId, name, role, avatarUrl }]`: staf aktif yang sudah onboarding dan punya PIN, tanpa ADMIN dan tanpa user saat ini. Bisa diakses semua role (berbeda dengan `GET /admin/staff` yang khusus ADMIN).
+- **Serah Terima Shift di Perangkat Bersama**: `POST /api/v1/auth/handover` (`{ "incomingStaffId", "pinCode", "notes"? }`) $\rightarrow$ `200` dengan bentuk sama seperti login (`{ accessToken, refreshToken, user }`) untuk staf pengganti; sesi staf lama dicabut. Ganti token di store dengan hasil ini. PIN salah `400` (tidak pernah `401`), PIN terkunci `429` (lockout dibagi dengan verify-pin & clock-in/out), staf yang keluar masih punya shift laci terbuka `409` `code: SHIFT_STILL_OPEN` (tutup shift dulu), penerima ADMIN/nonaktif `404`.
 - **Verifikasi PIN Keluar Kiosk**: `POST /api/v1/auth/verify-pin` (`{ "pinCode": "1234" }`) $\rightarrow$ `200 { "valid": true | false }`, tidak pernah `401`. 5x salah berturut-turut $\rightarrow$ `429` terkunci 5 menit (counter dibagi dengan clock-in/out).
 
 ---

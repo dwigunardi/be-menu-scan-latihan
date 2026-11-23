@@ -391,4 +391,162 @@ describe('AuthService', () => {
       expect(prismaService.user.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('handover', () => {
+    let incomingPinHash: string;
+    const incoming = (overrides: Record<string, unknown> = {}) => ({
+      id: '22222222-2222-4222-8222-222222222222',
+      employeeId: 'KC-007',
+      email: 'sari@menuscan.com',
+      name: 'Sari Kasir',
+      phone: null,
+      role: 'CASHIER',
+      pinCode: incomingPinHash,
+      isActive: true,
+      deletedAt: null,
+      needsOnboarding: false,
+      pinFailedAttempts: 0,
+      pinLockedUntil: null as Date | null,
+      ...overrides,
+    });
+    const dto = (overrides: Record<string, unknown> = {}) => ({
+      incomingStaffId: '22222222-2222-4222-8222-222222222222',
+      pinCode: '2580',
+      ...overrides,
+    });
+
+    beforeAll(async () => {
+      incomingPinHash = await bcrypt.hash('2580', 10);
+    });
+
+    beforeEach(() => {
+      prismaService.cashierShift = { findFirst: jest.fn().mockResolvedValue(null) };
+      prismaService.$transaction = jest.fn().mockResolvedValue([]);
+    });
+
+    it('verifies the incoming PIN, revokes the outgoing session and returns the incoming session', async () => {
+      prismaService.user.findUnique.mockResolvedValue(incoming());
+
+      const result = await service.handover('user-123', dto({ notes: 'Ganti shift sore' }));
+
+      expect(result.user).toMatchObject({
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'Sari Kasir',
+        role: 'CASHIER',
+      });
+      expect(result.accessToken).toBe('mock-jwt-token');
+      expect(result.refreshToken).toBe('mock-jwt-token');
+      // Tokens are issued for the INCOMING staff, not the outgoing one
+      expect(jwtService.signAsync.mock.calls[0][0]).toMatchObject({
+        sub: '22222222-2222-4222-8222-222222222222',
+        role: 'CASHIER',
+      });
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+        data: { refreshToken: null },
+      });
+      const incomingUpdate = prismaService.user.update.mock.calls.find(
+        (c: any[]) => c[0].where.id === '22222222-2222-4222-8222-222222222222',
+      )[0];
+      expect(incomingUpdate.data.refreshToken).toEqual(expect.any(String));
+      expect(prismaService.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a wrong PIN with 400 (never 401) and counts it toward the shared lockout', async () => {
+      prismaService.user.findUnique.mockResolvedValue(incoming());
+      prismaService.user.update.mockResolvedValue({ pinFailedAttempts: 1 });
+
+      await expect(service.handover('user-123', dto({ pinCode: '1111' }))).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: '22222222-2222-4222-8222-222222222222' },
+        data: { pinFailedAttempts: { increment: 1 } },
+        select: { pinFailedAttempts: true },
+      });
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('refuses with 429 while the incoming PIN is locked', async () => {
+      prismaService.user.findUnique.mockResolvedValue(
+        incoming({ pinLockedUntil: new Date(Date.now() + 60_000) }),
+      );
+
+      const error = await service.handover('user-123', dto()).catch((e) => e);
+
+      expect(error.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('blocks with 409 SHIFT_STILL_OPEN while the outgoing staff has an open cash drawer shift', async () => {
+      prismaService.cashierShift.findFirst.mockResolvedValue({ id: 'shift-1' });
+
+      const error = await service.handover('user-123', dto()).catch((e) => e);
+
+      expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+      expect(error.getResponse()).toMatchObject({ code: 'SHIFT_STILL_OPEN' });
+      expect(prismaService.cashierShift.findFirst).toHaveBeenCalledWith({
+        where: { staffId: 'user-123', status: 'OPEN' },
+        select: { id: true },
+      });
+      // Checked before the PIN, so no PIN attempt is consumed
+      expect(prismaService.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects handing over to yourself with 400', async () => {
+      await expect(
+        service.handover('user-123', dto({ incomingStaffId: 'user-123' })),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it.each([
+      ['missing', null],
+      ['inactive', { isActive: false }],
+      ['soft-deleted', { deletedAt: new Date() }],
+      ['an ADMIN', { role: 'ADMIN' }],
+    ])('rejects an incoming staff that is %s with 404', async (_label, overrides) => {
+      prismaService.user.findUnique.mockResolvedValue(
+        overrides === null ? null : incoming(overrides),
+      );
+
+      await expect(service.handover('user-123', dto())).rejects.toThrow(NotFoundException);
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['has not onboarded', { needsOnboarding: true }],
+      ['has no PIN', { pinCode: null }],
+    ])('rejects an incoming staff that %s with 400', async (_label, overrides) => {
+      prismaService.user.findUnique.mockResolvedValue(incoming(overrides));
+
+      await expect(service.handover('user-123', dto())).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getHandoverCandidates', () => {
+    it('lists active, onboarded, non-admin staff with a PIN, excluding the current user', async () => {
+      prismaService.user.findMany = jest.fn().mockResolvedValue([
+        { id: 's1', employeeId: 'KC-002', name: 'Andi', role: 'KITCHEN', avatarUrl: null },
+      ]);
+
+      const result = await service.getHandoverCandidates('user-123');
+
+      expect(result).toEqual([
+        { id: 's1', employeeId: 'KC-002', name: 'Andi', role: 'KITCHEN', avatarUrl: null },
+      ]);
+      expect(prismaService.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { not: 'user-123' },
+            isActive: true,
+            deletedAt: null,
+            needsOnboarding: false,
+            pinCode: { not: null },
+            role: { not: 'ADMIN' },
+          },
+          select: { id: true, employeeId: true, name: true, role: true, avatarUrl: true },
+        }),
+      );
+    });
+  });
 });
