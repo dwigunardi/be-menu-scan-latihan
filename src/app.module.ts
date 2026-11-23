@@ -1,6 +1,7 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import appConfig from './config/app.config';
 import { AppLoggerModule } from './common/logger/logger.module';
 import { PrismaModule } from './common/prisma/prisma.module';
@@ -8,6 +9,7 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { RedisModule } from './common/redis/redis.module';
 import { DecryptPayloadMiddleware } from './common/middlewares/decrypt-payload.middleware';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { OnboardingGuard } from './common/guards/onboarding.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
 // Domain Feature Modules
@@ -34,6 +36,12 @@ import { AppService } from './app.service';
       isGlobal: true,
       load: [appConfig],
     }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     AppLoggerModule,
     PrismaModule,
     CryptoModule,
@@ -57,7 +65,15 @@ import { AppService } from './app.service';
     AppService,
     {
       provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: OnboardingGuard,
     },
     {
       provide: APP_GUARD,

@@ -20,14 +20,18 @@
 
 Perencanaan, arsitektur, dan pelacakan milestone sistem terdokumentasi di folder `docs/`:
 
+- 🛡️ **[API Contract & Security Guidelines](docs/architecture/api-contract-and-security-guidelines.md)** ⭐  
+  Panduan resmi arsitektur backend, autentikasi 2-layer (JWT vs Handshake), matriks endpoint Public & Admin, checklist pembuatan endpoint baru, dan anti-patterns.
+- 📱 **[Master Frontend Integration Guide](docs/integration/frontend-integration-guide.md)**  
+  Panduan komprehensif integrasi frontend (Either/Result Pattern, Zod contract hardening, WebSocket events, dan state machines).
 - 🗺️ **[Implementation Milestones & Roadmap](docs/roadmap/implementation-milestones.md)**  
-  Dokumen tracking tahapan & milestone pengerjaan proyek dari Phase 0 hingga Phase 4.
-- 📄 **[Wireframe API & Blueprint Schema](docs/wireframe/wireframe-api-not-final.md)**  
-  Rincian endpoint Public & Admin, skema Prisma, dan kebutuhan paket.
+  Dokumen tracking tahapan & milestone pengerjaan proyek dari Phase 0 hingga Phase 5.
 - 📄 **[Payload Encryption Strategy](docs/security/encryption-decryption-strategy.md)**  
   Spesifikasi protokol ECDH Handshake, HKDF Key Derivation, dan format payload terenkripsi AES-256-GCM.
 - 📄 **[Architecture Design Specification](docs/architecture/architecture-design.md)**  
   Struktur folder modular `src/`, diagram alur eksekusi request-response (Middleware, Guard, Pipe, Interceptor).
+- 📄 **[Staff Attendance & Branch Settings Blueprint](docs/architecture/staff-and-attendance-blueprint.md)**  
+  Spesifikasi modul presensi staf (PIN hash, Haversine GPS geofencing, toleransi keterlambatan, & master shift).
 - 📄 **[Step-Tracing Logging Strategy](docs/architecture/logging-strategy.md)**  
   Pino structured logging, data redaction, & Opsi B (Hybrid Transport).
 - 📄 **[Database & Query Strategy Specification](docs/architecture/database-strategy.md)**  

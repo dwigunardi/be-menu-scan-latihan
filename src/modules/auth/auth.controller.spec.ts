@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { UserRole } from '@prisma/client';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 
@@ -11,6 +12,7 @@ describe('AuthController', () => {
       handshake: jest.fn(),
       login: jest.fn(),
       refreshTokens: jest.fn(),
+      onboard: jest.fn(),
       logout: jest.fn(),
       getMe: jest.fn(),
     };
@@ -60,7 +62,15 @@ describe('AuthController', () => {
       const expectedResponse = {
         accessToken: 'at-123',
         refreshToken: 'rt-123',
-        user: { id: 'u1', email: 'admin@menuscan.com', name: 'Admin' },
+        user: {
+          id: 'u1',
+          employeeId: 'KC-001',
+          email: 'admin@menuscan.com',
+          name: 'Admin',
+          phone: '+6281234567890',
+          role: UserRole.ADMIN,
+          needsOnboarding: false,
+        },
       };
 
       authService.login.mockResolvedValue(expectedResponse);
@@ -101,8 +111,13 @@ describe('AuthController', () => {
     it('should call authService.getMe with userId', async () => {
       const expectedProfile = {
         id: 'u1',
+        employeeId: 'KC-001',
         email: 'admin@menuscan.com',
         name: 'Admin User',
+        phone: '+6281234567890',
+        role: UserRole.ADMIN,
+        pinCodeSet: true,
+        needsOnboarding: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -111,6 +126,35 @@ describe('AuthController', () => {
       const result = await controller.getMe('u1');
       expect(result).toEqual(expectedProfile);
       expect(authService.getMe).toHaveBeenCalledWith('u1');
+    });
+  });
+
+  describe('onboard', () => {
+    it('should call authService.onboard with userId and dto', async () => {
+      const dto = {
+        currentPassword: 'tempPassword123',
+        newPassword: 'SecureNewPassword123!',
+        pinCode: '7890',
+      };
+      const expectedResponse = {
+        accessToken: 'at-new',
+        refreshToken: 'rt-new',
+        user: {
+          id: 'u1',
+          employeeId: 'KC-002',
+          email: 'staff@menuscan.com',
+          name: 'Staff',
+          phone: '+6281234567891',
+          role: UserRole.CASHIER,
+          needsOnboarding: false,
+        },
+      };
+
+      authService.onboard.mockResolvedValue(expectedResponse);
+
+      const result = await controller.onboard('u1', dto);
+      expect(result).toEqual(expectedResponse);
+      expect(authService.onboard).toHaveBeenCalledWith('u1', dto);
     });
   });
 });

@@ -40,6 +40,7 @@ describe('JwtStrategy', () => {
       email: 'admin@menuscan.com',
       name: 'Admin User',
       role: UserRole.ADMIN,
+      needsOnboarding: true,
       createdAt: new Date(),
     };
 
@@ -54,6 +55,7 @@ describe('JwtStrategy', () => {
         email: true,
         name: true,
         role: true,
+        needsOnboarding: true,
         createdAt: true,
       },
     });

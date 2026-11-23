@@ -34,6 +34,7 @@ export class StaffService {
       where.OR = [
         { name: { contains: s, mode: 'insensitive' } },
         { email: { contains: s, mode: 'insensitive' } },
+        { employeeId: { contains: s, mode: 'insensitive' } },
         { phone: { contains: s } },
       ];
     }
@@ -55,11 +56,13 @@ export class StaffService {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true,
+          employeeId: true,
           name: true,
           email: true,
           phone: true,
           role: true,
           pinCode: true,
+          needsOnboarding: true,
           dailyShiftHours: true,
           isActive: true,
           avatarUrl: true,
@@ -76,11 +79,13 @@ export class StaffService {
 
     const items = users.map((u) => ({
       id: u.id,
+      employeeId: u.employeeId,
       name: u.name,
       email: u.email,
       phone: u.phone,
       role: u.role,
       pinCodeSet: Boolean(u.pinCode),
+      needsOnboarding: u.needsOnboarding,
       dailyShiftHours: u.dailyShiftHours,
       isActive: u.isActive,
       avatarUrl: u.avatarUrl,
@@ -109,11 +114,13 @@ export class StaffService {
       where: { id, deletedAt: null },
       select: {
         id: true,
+        employeeId: true,
         name: true,
         email: true,
         phone: true,
         role: true,
         pinCode: true,
+        needsOnboarding: true,
         dailyShiftHours: true,
         isActive: true,
         avatarUrl: true,
@@ -131,11 +138,13 @@ export class StaffService {
 
     return {
       id: user.id,
+      employeeId: user.employeeId,
       name: user.name,
       email: user.email,
       phone: user.phone,
       role: user.role,
       pinCodeSet: Boolean(user.pinCode),
+      needsOnboarding: user.needsOnboarding,
       dailyShiftHours: user.dailyShiftHours,
       isActive: user.isActive,
       avatarUrl: user.avatarUrl,
@@ -156,6 +165,18 @@ export class StaffService {
       throw new ConflictException(`Email ${dto.email} sudah terdaftar`);
     }
 
+    // Check duplicate employeeId if supplied
+    if (dto.employeeId) {
+      const existingEmployee = await this.prisma.user.findFirst({
+        where: { employeeId: dto.employeeId, deletedAt: null },
+      });
+      if (existingEmployee) {
+        throw new ConflictException(
+          `NIK / ID Karyawan ${dto.employeeId} sudah terdaftar`,
+        );
+      }
+    }
+
     // Check duplicate phone if supplied
     if (dto.phone) {
       const existingPhone = await this.prisma.user.findFirst({
@@ -171,12 +192,14 @@ export class StaffService {
 
     const user = await this.prisma.user.create({
       data: {
+        employeeId: dto.employeeId || null,
         name: dto.name,
         email: dto.email,
         phone: dto.phone || null,
         role: dto.role,
         password: hashedPassword,
         pinCode: hashedPin,
+        needsOnboarding: true,
         dailyShiftHours: dto.dailyShiftHours || 8,
         isActive: true,
       },
@@ -184,11 +207,13 @@ export class StaffService {
 
     return {
       id: user.id,
+      employeeId: user.employeeId,
       name: user.name,
       email: user.email,
       phone: user.phone,
       role: user.role,
       pinCodeSet: Boolean(user.pinCode),
+      needsOnboarding: user.needsOnboarding,
       dailyShiftHours: user.dailyShiftHours,
       isActive: user.isActive,
       avatarUrl: user.avatarUrl,
@@ -208,7 +233,20 @@ export class StaffService {
         where: { email: dto.email, NOT: { id } },
       });
       if (duplicateEmail) {
-        throw new ConflictException(`Email ${dto.email} sudah digunakan oleh karyawan lain`);
+        throw new ConflictException(
+          `Email ${dto.email} sudah digunakan oleh karyawan lain`,
+        );
+      }
+    }
+
+    if (dto.employeeId) {
+      const duplicateEmployee = await this.prisma.user.findFirst({
+        where: { employeeId: dto.employeeId, NOT: { id }, deletedAt: null },
+      });
+      if (duplicateEmployee) {
+        throw new ConflictException(
+          `NIK / ID Karyawan ${dto.employeeId} sudah digunakan oleh karyawan lain`,
+        );
       }
     }
 
@@ -217,29 +255,38 @@ export class StaffService {
         where: { phone: dto.phone, NOT: { id }, deletedAt: null },
       });
       if (duplicatePhone) {
-        throw new ConflictException(`Nomor WhatsApp ${dto.phone} sudah digunakan oleh karyawan lain`);
+        throw new ConflictException(
+          `Nomor WhatsApp ${dto.phone} sudah digunakan oleh karyawan lain`,
+        );
       }
     }
 
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
+        ...(dto.employeeId !== undefined
+          ? { employeeId: dto.employeeId || null }
+          : {}),
         ...(dto.name ? { name: dto.name } : {}),
         ...(dto.email ? { email: dto.email } : {}),
         ...(dto.phone !== undefined ? { phone: dto.phone || null } : {}),
         ...(dto.role ? { role: dto.role } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.dailyShiftHours !== undefined ? { dailyShiftHours: dto.dailyShiftHours } : {}),
+        ...(dto.dailyShiftHours !== undefined
+          ? { dailyShiftHours: dto.dailyShiftHours }
+          : {}),
       },
     });
 
     return {
       id: updated.id,
+      employeeId: updated.employeeId,
       name: updated.name,
       email: updated.email,
       phone: updated.phone,
       role: updated.role,
       pinCodeSet: Boolean(updated.pinCode),
+      needsOnboarding: updated.needsOnboarding,
       dailyShiftHours: updated.dailyShiftHours,
       isActive: updated.isActive,
       avatarUrl: updated.avatarUrl,

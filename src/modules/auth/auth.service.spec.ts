@@ -4,7 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EcdhService } from '../../common/crypto/ecdh.service';
-import { UnauthorizedException, NotFoundException } from '@nestjs/common';
+import { UnauthorizedException, NotFoundException, BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 describe('AuthService', () => {
@@ -16,9 +16,15 @@ describe('AuthService', () => {
 
   const mockUser = {
     id: 'user-123',
+    employeeId: 'KC-001',
     email: 'admin@menuscan.com',
     password: '',
     name: 'Admin MenuScan',
+    phone: '+6281234567890',
+    role: 'ADMIN',
+    pinCode: null,
+    needsOnboarding: true,
+    isActive: true,
     refreshToken: null as string | null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -198,4 +204,65 @@ describe('AuthService', () => {
       );
     });
   });
+
+  describe('onboard', () => {
+    it('should successfully complete onboarding, update password and pin, and flip needsOnboarding to false', async () => {
+      prismaService.user.findUnique.mockResolvedValue(mockUser);
+      prismaService.user.update.mockResolvedValue({
+        ...mockUser,
+        needsOnboarding: false,
+      });
+
+      const result = await service.onboard('user-123', {
+        currentPassword: 'password123',
+        newPassword: 'SecurePassword123!',
+        pinCode: '7890',
+      });
+
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(result.user.needsOnboarding).toBe(false);
+      expect(prismaService.user.update).toHaveBeenCalled();
+    });
+
+    it('should throw BadRequestException if user already completed onboarding', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        needsOnboarding: false,
+      });
+
+      await expect(
+        service.onboard('user-123', {
+          currentPassword: 'password123',
+          newPassword: 'SecurePassword123!',
+          pinCode: '7890',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw UnauthorizedException if current temporary password is incorrect', async () => {
+      prismaService.user.findUnique.mockResolvedValue(mockUser);
+
+      await expect(
+        service.onboard('user-123', {
+          currentPassword: 'wrong-temporary-pwd',
+          newPassword: 'SecurePassword123!',
+          pinCode: '7890',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw NotFoundException if user does not exist', async () => {
+      prismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.onboard('nonexistent-user', {
+          currentPassword: 'password123',
+          newPassword: 'SecurePassword123!',
+          pinCode: '7890',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
 });
+
