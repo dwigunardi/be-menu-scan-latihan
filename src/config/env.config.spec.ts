@@ -1,4 +1,4 @@
-import { validateEnv } from './env.config';
+import { DEFAULT_PAYMENT_WEBHOOK_SECRET, validateEnv } from './env.config';
 
 describe('validateEnv', () => {
   const validConfig = {
@@ -28,6 +28,32 @@ describe('validateEnv', () => {
   it('should throw an error if required variable is missing', () => {
     const invalidConfig = { ...validConfig, DATABASE_URL: '' };
     expect(() => validateEnv(invalidConfig)).toThrow('Invalid Environment Variables Configuration');
+  });
+
+  it('refuses the public default webhook secret in production', () => {
+    expect(() =>
+      validateEnv({ ...validConfig, NODE_ENV: 'production' }),
+    ).toThrow('PAYMENT_WEBHOOK_SECRET must be set to a private value in production');
+    expect(() =>
+      validateEnv({
+        ...validConfig,
+        NODE_ENV: 'production',
+        PAYMENT_WEBHOOK_SECRET: DEFAULT_PAYMENT_WEBHOOK_SECRET,
+      }),
+    ).toThrow('PAYMENT_WEBHOOK_SECRET');
+  });
+
+  it('accepts a private webhook secret in production, and the default in development', () => {
+    expect(
+      validateEnv({
+        ...validConfig,
+        NODE_ENV: 'production',
+        PAYMENT_WEBHOOK_SECRET: 'a-private-production-secret',
+      }).PAYMENT_WEBHOOK_SECRET,
+    ).toBe('a-private-production-secret');
+    expect(validateEnv(validConfig).PAYMENT_WEBHOOK_SECRET).toBe(
+      DEFAULT_PAYMENT_WEBHOOK_SECRET,
+    );
   });
 
   it('should throw an error if secret is shorter than 16 characters', () => {

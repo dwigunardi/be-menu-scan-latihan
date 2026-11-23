@@ -13,7 +13,11 @@ const booleanStringSchema = (defaultValue: boolean) =>
     })
     .default(defaultValue);
 
-export const envSchema = z.object({
+/** Public, committed default: acceptable for local development only, refused in production. */
+export const DEFAULT_PAYMENT_WEBHOOK_SECRET = 'menuscan_payment_secret_123456789';
+
+export const envSchema = z
+  .object({
   // Application & Server
   PORT: z.coerce.number().default(5000),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -41,13 +45,23 @@ export const envSchema = z.object({
   REDIS_ENABLED: booleanStringSchema(true),
 
   // Payment Gateway
-  PAYMENT_WEBHOOK_SECRET: z.string().default('menuscan_payment_secret_123456789'),
+  PAYMENT_WEBHOOK_SECRET: z.string().default(DEFAULT_PAYMENT_WEBHOOK_SECRET),
 
   // Logging Strategy
   LOG_TO_FILE: booleanStringSchema(false),
   LOG_FILE_PATH: z.string().default('./logs'),
   LOG_RETENTION_DAYS: z.coerce.number().default(14),
-});
+  })
+  .refine(
+    (env) =>
+      env.NODE_ENV !== 'production' ||
+      env.PAYMENT_WEBHOOK_SECRET !== DEFAULT_PAYMENT_WEBHOOK_SECRET,
+    {
+      path: ['PAYMENT_WEBHOOK_SECRET'],
+      message:
+        'PAYMENT_WEBHOOK_SECRET must be set to a private value in production (the default is public in the repository)',
+    },
+  );
 
 export type EnvConfig = z.infer<typeof envSchema>;
 

@@ -7,12 +7,16 @@ import {
   Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CreateQrisDto, PaymentWebhookDto } from './dto/payments.dto';
 import { OrderPaymentService } from '../orders/order-payment.service';
 import { isOrderPaid } from '../orders/order-payment';
+import { DEFAULT_PAYMENT_WEBHOOK_SECRET } from '../../config/env.config';
+
+/** Signature accepted without verification outside production, for local webhook simulation (Swagger, scripts). */
+export const TEST_BYPASS_SIGNATURE = 'test_bypass_key';
 
 @Injectable()
 export class PaymentsService {
@@ -81,14 +85,18 @@ export class PaymentsService {
   async handleWebhook(dto: PaymentWebhookDto) {
     const secret = this.configService.get<string>(
       'PAYMENT_WEBHOOK_SECRET',
-      'menuscan_payment_secret_123456789',
+      DEFAULT_PAYMENT_WEBHOOK_SECRET,
     );
 
     // Validate Signature: SHA512(orderNumber + grossAmount + secret)
     const expectedRaw = `${dto.orderNumber}${Number(dto.grossAmount)}${secret}`;
     const expectedSignature = createHash('sha512').update(expectedRaw).digest('hex');
 
-    if (dto.signatureKey !== expectedSignature && dto.signatureKey !== 'test_bypass_key') {
+    // The bypass would let anyone mark any order paid, so it never applies in production
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const isTestBypass = !isProduction && dto.signatureKey === TEST_BYPASS_SIGNATURE;
+
+    if (!isTestBypass && !this.signatureMatches(dto.signatureKey, expectedSignature)) {
       this.logger.warn({
         step: 'PAYMENT_WEBHOOK_INVALID_SIGNATURE',
         orderNumber: dto.orderNumber,
@@ -219,13 +227,20 @@ export class PaymentsService {
     };
   }
 
+  /** Constant-time comparison so the expected signature cannot be guessed byte by byte from response timing. */
+  private signatureMatches(provided: string, expected: string): boolean {
+    const a = Buffer.from(provided);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
   /**
    * Helper utility for testing: Generate valid SHA-512 signature for test payload
    */
   generateTestSignature(orderNumber: string, grossAmount: number): string {
     const secret = this.configService.get<string>(
       'PAYMENT_WEBHOOK_SECRET',
-      'menuscan_payment_secret_123456789',
+      DEFAULT_PAYMENT_WEBHOOK_SECRET,
     );
     return createHash('sha512').update(`${orderNumber}${grossAmount}${secret}`).digest('hex');
   }

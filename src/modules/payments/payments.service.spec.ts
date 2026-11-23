@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException, ConflictException, UnauthorizedException } from '@nestjs/common';
-import { PaymentsService } from './payments.service';
+import { PaymentsService, TEST_BYPASS_SIGNATURE } from './payments.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { OrderPaymentService } from '../orders/order-payment.service';
@@ -10,6 +10,7 @@ describe('PaymentsService', () => {
   let service: PaymentsService;
   let prismaService: any;
   let configService: any;
+  let nodeEnv: string;
   let eventsGateway: any;
   let orderPaymentService: any;
 
@@ -25,6 +26,7 @@ describe('PaymentsService', () => {
   };
 
   beforeEach(async () => {
+    nodeEnv = 'development';
     prismaService = {
       order: {
         findUnique: jest.fn(),
@@ -33,7 +35,9 @@ describe('PaymentsService', () => {
     };
 
     configService = {
-      get: jest.fn().mockReturnValue('test_payment_secret_12345'),
+      get: jest.fn((key: string) =>
+        key === 'NODE_ENV' ? nodeEnv : 'test_payment_secret_12345',
+      ),
     };
 
     eventsGateway = {
@@ -116,6 +120,59 @@ describe('PaymentsService', () => {
   });
 
   describe('handleWebhook', () => {
+    describe('signature', () => {
+      beforeEach(() => {
+        prismaService.order.findUnique.mockResolvedValue(mockOrder);
+        orderPaymentService.markPaid.mockResolvedValue({
+          order: { ...mockOrder, status: 'PAID', paidAt: new Date() },
+          alreadyPaid: false,
+        });
+      });
+
+      const payload = (signatureKey: string) => ({
+        orderId: 'order-123',
+        orderNumber: 'ORD-20260810-001',
+        transactionStatus: 'SETTLEMENT' as const,
+        grossAmount: 86000,
+        paymentType: 'QRIS' as const,
+        signatureKey,
+      });
+
+      it('rejects an invalid signature with 401 and changes nothing', async () => {
+        await expect(
+          service.handleWebhook(payload('forged-signature')),
+        ).rejects.toThrow(UnauthorizedException);
+        expect(orderPaymentService.markPaid).not.toHaveBeenCalled();
+      });
+
+      it('accepts the test bypass signature outside production', async () => {
+        nodeEnv = 'development';
+
+        await service.handleWebhook(payload(TEST_BYPASS_SIGNATURE));
+
+        expect(orderPaymentService.markPaid).toHaveBeenCalled();
+      });
+
+      it('rejects the test bypass signature in production', async () => {
+        nodeEnv = 'production';
+
+        await expect(
+          service.handleWebhook(payload(TEST_BYPASS_SIGNATURE)),
+        ).rejects.toThrow(UnauthorizedException);
+        expect(orderPaymentService.markPaid).not.toHaveBeenCalled();
+      });
+
+      it('accepts a valid signature in production', async () => {
+        nodeEnv = 'production';
+
+        await service.handleWebhook(
+          payload(service.generateTestSignature('ORD-20260810-001', 86000)),
+        );
+
+        expect(orderPaymentService.markPaid).toHaveBeenCalled();
+      });
+    });
+
     const webhook = (overrides: Record<string, unknown> = {}) => ({
       orderId: 'order-123',
       orderNumber: 'ORD-20260810-001',
