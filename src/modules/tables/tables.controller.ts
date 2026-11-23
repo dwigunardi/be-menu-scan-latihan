@@ -99,6 +99,7 @@ export class TablesController {
   }
 
   @Delete('admin/tables/:id')
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Delete table' })
   @ApiResponse({ status: 200, description: 'Table deleted' })
   @ApiResponse({ status: 404, description: 'Table not found' })

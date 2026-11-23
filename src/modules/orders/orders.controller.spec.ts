@@ -90,9 +90,10 @@ describe('OrdersController', () => {
       const updated = { id: 'ord-1', status: 'PREPARING' };
       ordersService.updateStatus.mockResolvedValue(updated as any);
 
-      const result = await controller.updateOrderStatus('ord-1', dto, 'user-1');
+      const user = { id: 'user-1', role: 'CASHIER' as any };
+      const result = await controller.updateOrderStatus('ord-1', dto, user);
       expect(result).toEqual(updated);
-      expect(ordersService.updateStatus).toHaveBeenCalledWith('ord-1', dto, 'user-1');
+      expect(ordersService.updateStatus).toHaveBeenCalledWith('ord-1', dto, user);
     });
   });
 });

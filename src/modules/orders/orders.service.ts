@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -14,7 +15,18 @@ import {
   QueryOrderDto,
   UpdateOrderStatusDto,
 } from './dto/order.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
+
+export interface OrderActor {
+  id: string;
+  role: UserRole;
+}
+
+/** Target statuses only some roles may set. Others (PENDING, PREPARING, SERVED) are open to all staff roles. */
+export const RESTRICTED_STATUS_ROLES: Partial<Record<string, UserRole[]>> = {
+  PAID: [UserRole.ADMIN, UserRole.CASHIER],
+  CANCELLED: [UserRole.ADMIN, UserRole.CASHIER],
+};
 
 export const OrderStatus = {
   PENDING: 'PENDING',
@@ -272,7 +284,15 @@ export class OrdersService {
   /**
    * Admin / Staff: Update order status (PENDING -> PAID -> PREPARING -> SERVED / CANCELLED)
    */
-  async updateStatus(id: string, dto: UpdateOrderStatusDto, actorId?: string) {
+  async updateStatus(id: string, dto: UpdateOrderStatusDto, actor: OrderActor) {
+    // Taking money and cancelling are cashier decisions; kitchen and waiters move orders through preparation
+    const allowedRoles = RESTRICTED_STATUS_ROLES[dto.status];
+    if (allowedRoles && !allowedRoles.includes(actor.role)) {
+      throw new ForbiddenException(
+        `Hanya Admin atau Kasir yang dapat mengubah status order menjadi ${dto.status}`,
+      );
+    }
+
     const existing = await this.prisma.order.findUnique({
       where: { id },
     });
@@ -289,7 +309,7 @@ export class OrdersService {
         id,
         method,
         'CASHIER',
-        { receivedById: actorId },
+        { receivedById: actor.id },
       );
       return order;
     }

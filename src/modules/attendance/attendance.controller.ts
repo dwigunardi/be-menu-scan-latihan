@@ -40,8 +40,10 @@ import { Roles } from '../../common/decorators/roles.decorator';
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
+  // Kiosk tablet: any logged-in staff device records attendance; the staff's own PIN is the check
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('clock-in')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER)
   @HttpCode(HttpStatus.OK)
   @ZodResponse(AttendanceItemResponseSchema)
   @ApiOperation({ summary: 'Presensi Masuk Staf dengan Validasi PIN & Geofence GPS' })
@@ -52,6 +54,7 @@ export class AttendanceController {
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('clock-out')
+  @Roles(UserRole.ADMIN, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER)
   @HttpCode(HttpStatus.OK)
   @ZodResponse(AttendanceItemResponseSchema)
   @ApiOperation({ summary: 'Presensi Pulang Staf dengan Validasi PIN & Geofence GPS' })
