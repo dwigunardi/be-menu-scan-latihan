@@ -4,7 +4,7 @@
 > **Sistem**: MenuScan Staff Portal & Order Management  
 > **Lingkup**: Frontend (Next.js 15, Zustand, React Query) & Backend (NestJS 11, Passport JWT, Prisma ORM, Redis)  
 > **Tujuan**: Menjelaskan seluruh alur login, siklus hidup dual-token JWT, silent auto-refresh, serta modal pemulihan sesi kedaluwarsa tanpa kehilangan data kerja.
-> **Rencana perubahan**: refresh token akan dipindah dari `localStorage` ke cookie `HttpOnly`; lihat [refresh-token-httponly-cookie-plan.md](./refresh-token-httponly-cookie-plan.md). Dokumen ini masih menggambarkan alur saat ini.
+> **Perubahan 2026-11-23**: refresh token kini berada di cookie `HttpOnly` `menuscan_rt`, tidak lagi di body respons atau `localStorage`. Kontrak lengkap: [refresh-token-httponly-cookie-plan.md](./refresh-token-httponly-cookie-plan.md) bagian 2. Diagram di bawah sudah disesuaikan.
 
 ---
 
@@ -59,10 +59,10 @@ sequenceDiagram
     else Password Cocok
         AuthSvc->>AuthSvc: Generate Access Token (TTL: 15m)<br/>Payload: { sub: userId, email, role }
         AuthSvc->>AuthSvc: Generate Refresh Token (TTL: 7d)<br/>Payload: { sub: userId }
-        AuthSvc->>DB: Update user.refreshToken = hashedRefreshToken
-        AuthSvc-->>Pipe: 200 OK { user, accessToken, refreshToken, expiresIn: 900 }
+        AuthSvc->>DB: Update user.refreshToken = sha256(refreshToken)
+        AuthSvc-->>Pipe: 200 OK { user, accessToken } + Set-Cookie: menuscan_rt (HttpOnly)
         
-        Pipe->>Store: setAuth({ user, token: accessToken, refreshToken })
+        Pipe->>Store: setAuth({ user, token: accessToken })
         Store->>UI: Redirect otomatis ke Dashboard sesuai Role
         UI-->>Staff: Masuk ke Portal Operasional
     end
@@ -77,8 +77,8 @@ sequenceDiagram
 | **Masa Berlaku (TTL)** | **15 Menit** | **7 Hari** |
 | **Format Token** | JSON Web Token (JWT) | JSON Web Token (JWT) |
 | **Payload Claims** | `{ sub, email, role, exp, iat }` | `{ sub, exp, iat }` |
-| **Penyimpanan Frontend** | Memory Store (Zustand) + LocalStorage Sync | Encrypted LocalStorage / Secure Cookie |
-| **Penyimpanan Backend** | Stateless (Diverifikasi via JWT Secret) | Hashed di database `User.refreshToken` / Redis |
+| **Penyimpanan Frontend** | Memory Store (Zustand) + LocalStorage Sync | Cookie `HttpOnly` `menuscan_rt` (tidak bisa dibaca JavaScript; dikelola browser) |
+| **Penyimpanan Backend** | Stateless (Diverifikasi via JWT Secret) | Hash SHA-256 di database `User.refreshToken` (satu sesi per user), dirotasi setiap refresh |
 | **Fungsi Utama** | Digunakan pada setiap request API ke `/admin/*` via header `Authorization: Bearer <token>`. | Digunakan khusus untuk meminta Access Token baru ke endpoint `POST /auth/refresh`. |
 
 ---
@@ -105,10 +105,10 @@ sequenceDiagram
     
     alt Tidak Ada yang Sedang Refresh (Request Pertama)
         Lock->>Lock: Aktifkan Mutex Lock (isRefreshing = true)
-        AuthMW->>AuthAPI: POST /api/v1/auth/refresh { refreshToken }
+        AuthMW->>AuthAPI: POST /api/v1/auth/refresh {} (credentials: include, cookie menuscan_rt)
         AuthAPI->>BE: POST /api/v1/auth/refresh
         BE->>BE: Verifikasi Refresh Token & Cocokkan Hash di Database
-        BE-->>AuthAPI: 200 OK { accessToken: NewAccessToken, refreshToken: NewRefreshToken }
+        BE-->>AuthAPI: 200 OK { accessToken: NewAccessToken } + Set-Cookie: menuscan_rt baru
         AuthAPI->>AuthMW: Simpan Access Token Baru di Auth Store
         Lock->>Lock: Lepaskan Mutex Lock (isRefreshing = false)
         
@@ -161,8 +161,8 @@ Jika Refresh Token juga sudah habis masa berlakunya (misal staf tidak membuka ap
 ## 6. Alur Logout & Pencabutan Sesi
 
 Ketika staf menekan tombol "Keluar" di header:
-1. Frontend memanggil `POST /api/v1/auth/logout` membawa `accessToken` dan `refreshToken`.
-2. Backend menghapus `refreshToken` di database (`User.refreshToken = null`) dan membersihkan session key di Redis.
+1. Frontend memanggil `POST /api/v1/auth/logout` dengan `credentials: 'include'` (cookie `menuscan_rt` ikut terkirim otomatis); access token tidak diperlukan.
+2. Backend mencabut sesi (`User.refreshToken = null`) hanya jika cookie itu adalah sesi yang sedang aktif, lalu selalu menghapus cookie.
 3. Frontend mengosongkan state `useAuthStore` dan menghapus data sesi di local storage.
 4. Pengguna dialihkan ke halaman login `/admin/login`.
 
@@ -203,6 +203,7 @@ stateDiagram-v2
 
 ### Backend (`be-menu-scan-latihan`)
 - `src/modules/auth/auth.controller.ts`: Endpoint `/auth/login`, `/auth/refresh`, `/auth/logout`, dan `/auth/me`.
-- `src/modules/auth/auth.service.ts`: Logika pembuatan JWT token, hash bcrypt, validasi refresh token.
+- `src/modules/auth/auth.service.ts`: Logika pembuatan JWT token, hash SHA-256 & rotasi refresh token.
+- `src/modules/auth/refresh-cookie.service.ts`: Penulisan dan penghapusan cookie `menuscan_rt`.
 - `src/common/guards/jwt-auth.guard.ts`: Passport JWT Guard untuk validasi header `Authorization: Bearer`.
 - `src/common/guards/roles.guard.ts`: RBAC Guard untuk validasi dekorator `@Roles()`.

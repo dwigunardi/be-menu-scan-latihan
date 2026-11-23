@@ -5,6 +5,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EcdhService } from '../../common/crypto/ecdh.service';
 import { PinVerificationService } from '../../common/security/pin-verification.service';
+import { hashRefreshToken } from './refresh-token-hash';
+import { SessionSupersededException } from './session-superseded.exception';
 import {
   UnauthorizedException,
   NotFoundException,
@@ -144,22 +146,28 @@ describe('AuthService', () => {
   });
 
   describe('refreshTokens', () => {
-    it('should refresh tokens when valid refresh token is provided', async () => {
-      const hashedRefreshToken = await bcrypt.hash('valid-refresh-token', 10);
+    beforeEach(() => {
+      jwtService.verifyAsync = jest.fn().mockResolvedValue({ sub: 'user-123' });
+    });
+
+    it('verifies the cookie token, then rotates only the exact hash that was verified', async () => {
+      const hashedRefreshToken = hashRefreshToken('valid-refresh-token');
       prismaService.user.findUnique.mockResolvedValue({
         ...mockUser,
         refreshToken: hashedRefreshToken,
       });
       prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 1 });
 
-      const result = await service.refreshTokens(
-        'user-123',
-        'valid-refresh-token',
-      );
+      const result = await service.refreshTokens('valid-refresh-token');
 
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('valid-refresh-token', {
+        secret: 'supersecretkey123456',
+      });
+      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+      });
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
-      // Rotation only replaces the exact hash that was verified
       const args = prismaService.user.updateMany.mock.calls[0][0];
       expect(args.where).toEqual({
         id: 'user-123',
@@ -169,9 +177,25 @@ describe('AuthService', () => {
       expect(args.data.refreshToken).not.toBe(hashedRefreshToken);
     });
 
+    it('rejects a missing cookie with 401 without touching the database', async () => {
+      await expect(service.refreshTokens(undefined)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(prismaService.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects an invalid or expired JWT with 401', async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+
+      await expect(service.refreshTokens('expired-rt')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(prismaService.user.findUnique).not.toHaveBeenCalled();
+    });
+
     it('issues no tokens (401) when the session was revoked or rotated during the refresh', async () => {
       // e.g. a shift handover or logout cleared the hash between the read and the write
-      const hashedRefreshToken = await bcrypt.hash('valid-refresh-token', 10);
+      const hashedRefreshToken = hashRefreshToken('valid-refresh-token');
       prismaService.user.findUnique.mockResolvedValue({
         ...mockUser,
         refreshToken: hashedRefreshToken,
@@ -179,34 +203,141 @@ describe('AuthService', () => {
       prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 0 });
 
       await expect(
-        service.refreshTokens('user-123', 'valid-refresh-token'),
+        service.refreshTokens('valid-refresh-token'),
       ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('should throw UnauthorizedException when refresh token hash does not match', async () => {
-      const hashedRefreshToken = await bcrypt.hash('different-token', 10);
+    it('rejects an older token of the same user even though both share a long common prefix', async () => {
+      // Regression: bcrypt only compared the first 72 bytes, which are identical for every token of a user
+      const prefix = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' + 'x'.repeat(80);
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        refreshToken: hashRefreshToken(prefix + 'CURRENT'),
+      });
+
+      await expect(service.refreshTokens(prefix + 'ROTATED-OUT')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('rejects a session whose stored hash is a legacy bcrypt hash (must log in again)', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        refreshToken: await bcrypt.hash('valid-refresh-token', 10),
+      });
+
+      await expect(service.refreshTokens('valid-refresh-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('issues refresh tokens with a unique jti so two issued in the same second differ', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        refreshToken: hashRefreshToken('valid-refresh-token'),
+      });
+      prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+
+      await service.refreshTokens('valid-refresh-token');
+
+      const refreshSignCall = jwtService.signAsync.mock.calls.find(
+        (c: any[]) => c[0].jti,
+      );
+      expect(refreshSignCall[0].jti).toMatch(/^[0-9a-f-]{36}$/);
+      // The access token carries no jti
+      expect(jwtService.signAsync.mock.calls.filter((c: any[]) => c[0].jti)).toHaveLength(1);
+    });
+
+    it.each([
+      ['deactivated', { isActive: false }],
+      ['deleted', { deletedAt: new Date() }],
+    ])('rejects refresh for %s staff (cookie must be cleared: plain 401)', async (_label, overrides) => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        ...overrides,
+        refreshToken: hashRefreshToken('valid-refresh-token'),
+      });
+
+      const error = await service.refreshTokens('valid-refresh-token').catch((e) => e);
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect(error).not.toBeInstanceOf(SessionSupersededException);
+    });
+
+    it('marks a lost race (conditional update matched nothing) as superseded, not dead', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        refreshToken: hashRefreshToken('valid-refresh-token'),
+      });
+      prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 0 });
+
+      await expect(service.refreshTokens('valid-refresh-token')).rejects.toBeInstanceOf(
+        SessionSupersededException,
+      );
+    });
+
+    it('rejects (401) a validly signed token whose hash no longer matches (revoked or rotated)', async () => {
+      const hashedRefreshToken = hashRefreshToken('different-token');
       prismaService.user.findUnique.mockResolvedValue({
         ...mockUser,
         refreshToken: hashedRefreshToken,
       });
 
-      await expect(
-        service.refreshTokens('user-123', 'invalid-token'),
-      ).rejects.toThrow(UnauthorizedException);
+      // Superseded: still a 401, but the controller keeps the cookie (a parallel refresh may have rotated it)
+      await expect(service.refreshTokens('invalid-token')).rejects.toBeInstanceOf(
+        SessionSupersededException,
+      );
     });
   });
 
   describe('logout', () => {
-    it('should clear refresh token in database', async () => {
-      prismaService.user.update.mockResolvedValue(mockUser);
+    beforeEach(() => {
+      prismaService.user.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    });
 
-      const result = await service.logout('user-123');
+    it('revokes exactly the session of the presented cookie (hash must match), ignoring expiry', async () => {
+      jwtService.verifyAsync = jest.fn().mockResolvedValue({ sub: 'user-123' });
+
+      const result = await service.logout('rt-current');
 
       expect(result.success).toBe(true);
-      expect(prismaService.user.update).toHaveBeenCalledWith({
-        where: { id: 'user-123' },
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('rt-current', {
+        secret: 'supersecretkey123456',
+        ignoreExpiration: true,
+      });
+      expect(prismaService.user.updateMany).toHaveBeenCalledWith({
+        where: { id: 'user-123', refreshToken: hashRefreshToken('rt-current') },
         data: { refreshToken: null },
       });
+    });
+
+    it("does not touch the user's current session when the cookie is stale (late logout, old device)", async () => {
+      jwtService.verifyAsync = jest.fn().mockResolvedValue({ sub: 'user-123' });
+      // The stored hash belongs to a newer session, so the conditional update matches nothing
+      prismaService.user.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service.logout('rt-from-previous-session');
+
+      expect(result.success).toBe(true);
+      expect(prismaService.user.updateMany.mock.calls[0][0].where).toEqual({
+        id: 'user-123',
+        refreshToken: hashRefreshToken('rt-from-previous-session'),
+      });
+    });
+
+    it('revokes nothing for an unverifiable token', async () => {
+      jwtService.verifyAsync = jest.fn().mockRejectedValue(new Error('invalid signature'));
+
+      await expect(service.logout('forged')).resolves.toMatchObject({ success: true });
+      expect(prismaService.user.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('succeeds without a cookie and revokes nothing', async () => {
+      jwtService.verifyAsync = jest.fn();
+
+      await expect(service.logout(undefined)).resolves.toMatchObject({ success: true });
+      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(prismaService.user.updateMany).not.toHaveBeenCalled();
     });
   });
 

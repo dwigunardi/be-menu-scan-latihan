@@ -136,8 +136,9 @@ Endpoint ini **tidak memerlukan JWT** (menggunakan decorator `@Public()`).
 | :--- | :---: | :--- | :--- | :---: |
 | **Root** | `GET` | `/api/v1` | Health check server NestJS. | ✅ Didukung |
 | **Auth** | `POST` | `/api/v1/auth/handshake` | Pertukaran kunci publik ECDH untuk membentuk session key. | ❌ **Bypass (`@SkipEncryption`)** |
-| **Auth** | `POST` | `/api/v1/auth/login` | Login akun staf/admin dengan email & password. | ✅ Didukung *(Password terenkripsi)* |
-| **Auth** | `POST` | `/api/v1/auth/refresh` | Perpanjangan Access Token dengan Refresh Token. | ✅ Didukung |
+| **Auth** | `POST` | `/api/v1/auth/login` | Login akun staf/admin (wajib JSON). Respons `{ accessToken, user }` + cookie `HttpOnly` `menuscan_rt` (refresh token). | ✅ Didukung *(Password terenkripsi)* |
+| **Auth** | `POST` | `/api/v1/auth/refresh` | Access Token baru dari refresh token di cookie (`credentials: 'include'`, `Origin` di allowlist, JSON). Cookie dirotasi. | ✅ Didukung |
+| **Auth** | `POST` | `/api/v1/auth/logout` | Cabut sesi milik cookie yang dikirim (jika masih aktif) dan selalu hapus cookie. Tanpa access token; `Origin` di allowlist, JSON. | ✅ Didukung |
 | **Categories** | `GET` | `/api/v1/public/categories` | Mengambil daftar kategori menu aktif (sortOrder asc). | ✅ Didukung |
 | **Menus** | `GET` | `/api/v1/public/menus` | Mengambil katalog menu tersedia beserta varian & harga. | ✅ Didukung |
 | **Menus** | `GET` | `/api/v1/public/menus/:id` | Mengambil detail 1 menu beserta grup varian opsional/wajib. | ✅ Didukung |
@@ -157,7 +158,6 @@ Endpoint ini **wajib menyertakan header `Authorization: Bearer <token>`** dan di
 
 | Modul | Method | Path | Allowed Roles | Fungsi & Kegunaan |
 | :--- | :---: | :--- | :--- | :--- |
-| **Auth** | `POST` | `/api/v1/auth/logout` | All Roles | Revoke refresh token & clear session. |
 | **Auth** | `GET` | `/api/v1/auth/me` | All Roles | Mengambil data profil staf yang sedang login. |
 | **Auth** | `POST` | `/api/v1/auth/onboard` | All Roles *(Karantina)* | Aktivasi akun pertama kali (ganti password sementara, set 4-digit PIN, & flip `needsOnboarding: false`). |
 | **Auth** | `GET` | `/api/v1/auth/handover/candidates` | All Roles | Daftar staf yang bisa menerima serah terima perangkat (aktif, sudah onboarding, punya PIN, bukan ADMIN, bukan user saat ini). Field minimal. |

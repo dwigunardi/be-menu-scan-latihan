@@ -272,6 +272,8 @@ export class StaffService {
         ...(dto.phone !== undefined ? { phone: dto.phone || null } : {}),
         ...(dto.role ? { role: dto.role } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        // Deactivating a staff member ends their session right away
+        ...(dto.isActive === false ? { refreshToken: null } : {}),
         ...(dto.dailyShiftHours !== undefined
           ? { dailyShiftHours: dto.dailyShiftHours }
           : {}),
@@ -322,6 +324,7 @@ export class StaffService {
       data: {
         deletedAt: new Date(),
         isActive: false,
+        refreshToken: null, // end the removed staff member's session
       },
     });
 

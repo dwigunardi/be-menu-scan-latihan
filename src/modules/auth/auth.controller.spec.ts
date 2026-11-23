@@ -1,11 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { RefreshCookieService } from './refresh-cookie.service';
+import { CookieCsrfGuard } from '../../common/guards/cookie-csrf.guard';
+import { JsonBodyGuard } from '../../common/guards/json-body.guard';
+import { SessionSupersededException } from './session-superseded.exception';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: jest.Mocked<AuthService>;
+  let refreshCookie: { read: jest.Mock; set: jest.Mock; clear: jest.Mock };
+  const res = {} as any;
+
+  const user = {
+    id: 'u1',
+    employeeId: 'KC-001',
+    email: 'admin@menuscan.com',
+    name: 'Admin',
+    phone: '+6281234567890',
+    role: UserRole.ADMIN,
+    needsOnboarding: false,
+  };
 
   beforeEach(async () => {
     const mockAuthService = {
@@ -19,16 +36,20 @@ describe('AuthController', () => {
       getHandoverCandidates: jest.fn(),
       handover: jest.fn(),
     };
+    refreshCookie = { read: jest.fn(), set: jest.fn(), clear: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
       providers: [
-        {
-          provide: AuthService,
-          useValue: mockAuthService,
-        },
+        { provide: AuthService, useValue: mockAuthService },
+        { provide: RefreshCookieService, useValue: refreshCookie },
       ],
-    }).compile();
+    })
+      .overrideGuard(CookieCsrfGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(JsonBodyGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AuthController>(AuthController);
     authService = module.get(AuthService);
@@ -60,67 +81,121 @@ describe('AuthController', () => {
   });
 
   describe('login', () => {
-    it('should call authService.login and return auth tokens', async () => {
+    it('puts the refresh token in the HttpOnly cookie, not in the body', async () => {
       const dto = { email: 'admin@menuscan.com', password: 'password123' };
-      const expectedResponse = {
+      authService.login.mockResolvedValue({
         accessToken: 'at-123',
         refreshToken: 'rt-123',
-        user: {
-          id: 'u1',
-          employeeId: 'KC-001',
-          email: 'admin@menuscan.com',
-          name: 'Admin',
-          phone: '+6281234567890',
-          role: UserRole.ADMIN,
-          needsOnboarding: false,
-        },
-      };
+        user,
+      });
 
-      authService.login.mockResolvedValue(expectedResponse);
+      const result = await controller.login(dto, res);
 
-      const result = await controller.login(dto);
-      expect(result).toEqual(expectedResponse);
+      expect(result).toEqual({ accessToken: 'at-123', user });
+      expect(result).not.toHaveProperty('refreshToken');
+      expect(refreshCookie.set).toHaveBeenCalledWith(res, 'rt-123');
       expect(authService.login).toHaveBeenCalledWith(dto);
     });
   });
 
+  it('guards login with JsonBodyGuard (blocks cross-site form login CSRF)', () => {
+    const guards = Reflect.getMetadata('__guards__', AuthController.prototype.login);
+    expect(guards).toContain(JsonBodyGuard);
+  });
+
+  it('guards refresh and logout with CookieCsrfGuard', () => {
+    expect(Reflect.getMetadata('__guards__', AuthController.prototype.refresh)).toContain(CookieCsrfGuard);
+    expect(Reflect.getMetadata('__guards__', AuthController.prototype.logout)).toContain(CookieCsrfGuard);
+  });
+
   describe('refresh', () => {
-    it('should call authService.refreshTokens with user info from req', async () => {
-      const req = {
-        user: { id: 'u1', refreshToken: 'old-refresh-token' },
-      };
-      const expectedTokens = { accessToken: 'new-at', refreshToken: 'new-rt' };
+    const req = { cookies: { menuscan_rt: 'old-rt' } } as any;
 
-      authService.refreshTokens.mockResolvedValue(expectedTokens);
+    it('refreshes from the cookie and rotates it', async () => {
+      refreshCookie.read.mockReturnValue('old-rt');
+      authService.refreshTokens.mockResolvedValue({
+        accessToken: 'new-at',
+        refreshToken: 'new-rt',
+      });
 
-      const result = await controller.refresh({ refreshToken: 'old-refresh-token' }, req);
-      expect(result).toEqual(expectedTokens);
-      expect(authService.refreshTokens).toHaveBeenCalledWith('u1', 'old-refresh-token');
+      const result = await controller.refresh(req, res);
+
+      expect(refreshCookie.read).toHaveBeenCalledWith(req);
+      expect(authService.refreshTokens).toHaveBeenCalledWith('old-rt');
+      expect(result).toEqual({ accessToken: 'new-at' });
+      expect(refreshCookie.set).toHaveBeenCalledWith(res, 'new-rt');
+      expect(refreshCookie.clear).not.toHaveBeenCalled();
+    });
+
+    it('clears the cookie when the refresh is rejected (401)', async () => {
+      refreshCookie.read.mockReturnValue('revoked-rt');
+      authService.refreshTokens.mockRejectedValue(
+        new UnauthorizedException('Invalid or revoked refresh token'),
+      );
+
+      await expect(controller.refresh(req, res)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshCookie.clear).toHaveBeenCalledWith(res);
+      expect(refreshCookie.set).not.toHaveBeenCalled();
+    });
+
+    it('keeps the cookie when the request lost a race to a parallel refresh', async () => {
+      refreshCookie.read.mockReturnValue('old-rt');
+      authService.refreshTokens.mockRejectedValue(
+        new SessionSupersededException('Session was revoked or refreshed elsewhere'),
+      );
+
+      await expect(controller.refresh(req, res)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(refreshCookie.clear).not.toHaveBeenCalled();
+    });
+
+    it('keeps the cookie on a transient server error', async () => {
+      refreshCookie.read.mockReturnValue('old-rt');
+      authService.refreshTokens.mockRejectedValue(
+        new InternalServerErrorException(),
+      );
+
+      await expect(controller.refresh(req, res)).rejects.toThrow(
+        InternalServerErrorException,
+      );
+      expect(refreshCookie.clear).not.toHaveBeenCalled();
     });
   });
 
   describe('logout', () => {
-    it('should call authService.logout with userId', async () => {
+    it('revokes the session of the cookie and always clears the cookie', async () => {
+      const req = { headers: {}, cookies: { menuscan_rt: 'rt-123' } } as any;
+      refreshCookie.read.mockReturnValue('rt-123');
       const expectedResponse = { success: true, message: 'Logged out successfully' };
       authService.logout.mockResolvedValue(expectedResponse);
 
-      const result = await controller.logout('u1');
+      const result = await controller.logout(req, res);
+
       expect(result).toEqual(expectedResponse);
-      expect(authService.logout).toHaveBeenCalledWith('u1');
+      expect(authService.logout).toHaveBeenCalledWith('rt-123');
+      expect(refreshCookie.clear).toHaveBeenCalledWith(res);
+    });
+
+    it('ignores a Bearer access token (revocation is by the exact session cookie only)', async () => {
+      const req = { headers: { authorization: 'Bearer at-123' }, cookies: {} } as any;
+      refreshCookie.read.mockReturnValue(undefined);
+      authService.logout.mockResolvedValue({ success: true, message: 'ok' });
+
+      await controller.logout(req, res);
+
+      expect(authService.logout).toHaveBeenCalledWith(undefined);
+      expect(refreshCookie.clear).toHaveBeenCalledWith(res);
     });
   });
 
   describe('getMe', () => {
     it('should call authService.getMe with userId', async () => {
       const expectedProfile = {
-        id: 'u1',
-        employeeId: 'KC-001',
-        email: 'admin@menuscan.com',
-        name: 'Admin User',
-        phone: '+6281234567890',
-        role: UserRole.ADMIN,
+        ...user,
         pinCodeSet: true,
-        needsOnboarding: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -133,30 +208,22 @@ describe('AuthController', () => {
   });
 
   describe('onboard', () => {
-    it('should call authService.onboard with userId and dto', async () => {
+    it('sets the refresh cookie and returns the session without the refresh token', async () => {
       const dto = {
         currentPassword: 'tempPassword123',
         newPassword: 'SecureNewPassword123!',
         pinCode: '7890',
       };
-      const expectedResponse = {
+      authService.onboard.mockResolvedValue({
         accessToken: 'at-new',
         refreshToken: 'rt-new',
-        user: {
-          id: 'u1',
-          employeeId: 'KC-002',
-          email: 'staff@menuscan.com',
-          name: 'Staff',
-          phone: '+6281234567891',
-          role: UserRole.CASHIER,
-          needsOnboarding: false,
-        },
-      };
+        user,
+      });
 
-      authService.onboard.mockResolvedValue(expectedResponse);
+      const result = await controller.onboard('u1', dto, res);
 
-      const result = await controller.onboard('u1', dto);
-      expect(result).toEqual(expectedResponse);
+      expect(result).toEqual({ accessToken: 'at-new', user });
+      expect(refreshCookie.set).toHaveBeenCalledWith(res, 'rt-new');
       expect(authService.onboard).toHaveBeenCalledWith('u1', dto);
     });
   });
@@ -183,16 +250,22 @@ describe('AuthController', () => {
       expect(authService.getHandoverCandidates).toHaveBeenCalledWith('u1');
     });
 
-    it('hands over from the current user to the incoming staff', async () => {
+    it("sets the incoming staff's refresh cookie and returns their session", async () => {
       const dto = {
         incomingStaffId: '22222222-2222-4222-8222-222222222222',
         pinCode: '2580',
       };
-      authService.handover.mockResolvedValue({} as any);
+      authService.handover.mockResolvedValue({
+        accessToken: 'at-b',
+        refreshToken: 'rt-b',
+        user,
+      });
 
-      await controller.handover('u1', dto);
+      const result = await controller.handover('u1', dto, res);
 
       expect(authService.handover).toHaveBeenCalledWith('u1', dto);
+      expect(result).toEqual({ accessToken: 'at-b', user });
+      expect(refreshCookie.set).toHaveBeenCalledWith(res, 'rt-b');
     });
   });
 });
