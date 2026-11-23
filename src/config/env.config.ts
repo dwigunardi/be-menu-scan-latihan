@@ -44,6 +44,10 @@ export const envSchema = z
   REDIS_DB: z.coerce.number().default(0),
   REDIS_ENABLED: booleanStringSchema(true),
 
+  // Refresh-token cookie: 'strict' when FE and API share a site (e.g. app.x & api.x, or localhost);
+  // 'none' only for different sites, and then the cookie is always Secure
+  REFRESH_COOKIE_SAMESITE: z.enum(['strict', 'lax', 'none']).default('strict'),
+
   // Payment Gateway
   PAYMENT_WEBHOOK_SECRET: z.string().default(DEFAULT_PAYMENT_WEBHOOK_SECRET),
 

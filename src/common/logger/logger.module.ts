@@ -49,6 +49,9 @@ import { randomUUID } from 'node:crypto';
             redact: [
               'req.headers.authorization',
               'req.headers["x-handshake-token"]',
+              // The HttpOnly refresh cookie (menuscan_rt) travels in these headers
+              'req.headers.cookie',
+              'res.headers["set-cookie"]',
               'body.password',
               'body.currentPassword',
               'body.newPassword',

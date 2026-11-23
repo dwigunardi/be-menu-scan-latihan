@@ -7,14 +7,19 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Res,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { RefreshCookieService } from './refresh-cookie.service';
+import { CookieCsrfGuard } from '../../common/guards/cookie-csrf.guard';
+import { JsonBodyGuard } from '../../common/guards/json-body.guard';
+import { SessionSupersededException } from './session-superseded.exception';
 import { HandshakeDto } from './dto/handshake.dto';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
 import { VerifyPinDto, VerifyPinResponseSchema } from './dto/verify-pin.dto';
 import { HandoverCandidatesResponseSchema, HandoverDto } from './dto/handover.dto';
@@ -27,7 +32,20 @@ import { AllowDuringOnboarding } from '../../common/decorators/allow-during-onbo
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly refreshCookie: RefreshCookieService,
+  ) {}
+
+  /** Moves the refresh token from the response body into the HttpOnly cookie. */
+  private respondWithSession<T extends { refreshToken: string }>(
+    res: Response,
+    session: T,
+  ): Omit<T, 'refreshToken'> {
+    const { refreshToken, ...body } = session;
+    this.refreshCookie.set(res, refreshToken);
+    return body;
+  }
 
   @Public()
   @SkipEncryption()
@@ -44,25 +62,56 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(JsonBodyGuard)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Admin / Staff User Login' })
-  @ApiResponse({ status: 200, description: 'Login successful' })
+  @ApiOperation({
+    summary: 'Admin / Staff User Login',
+    description: 'Returns { accessToken, user }; the refresh token is set as the HttpOnly cookie menuscan_rt.',
+  })
+  @ApiResponse({ status: 200, description: 'Login successful (Set-Cookie: menuscan_rt)' })
   @ApiResponse({ status: 401, description: 'Invalid email or password' })
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.respondWithSession(res, await this.authService.login(dto));
   }
 
   @Public()
-  @UseGuards(AuthGuard('jwt-refresh'))
+  @UseGuards(CookieCsrfGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Refresh Access and Refresh Tokens' })
-  @ApiResponse({ status: 200, description: 'Tokens renewed' })
-  @ApiResponse({ status: 401, description: 'Invalid or revoked refresh token' })
-  async refresh(@Body() _dto: RefreshTokenDto, @Req() req: any) {
-    return this.authService.refreshTokens(req.user.id, req.user.refreshToken);
+  @ApiOperation({
+    summary: 'Refresh the access token using the HttpOnly refresh cookie',
+    description:
+      'Reads menuscan_rt (no body needed), rotates it, and returns { accessToken }. Requires an allowed Origin ' +
+      'and Content-Type: application/json (CSRF). A rejected refresh clears the cookie.',
+  })
+  @ApiResponse({ status: 200, description: '{ accessToken } (Set-Cookie: rotated menuscan_rt)' })
+  @ApiResponse({ status: 401, description: 'Missing, invalid, expired or revoked refresh cookie' })
+  @ApiResponse({ status: 403, description: 'Origin not allowed or Content-Type is not application/json' })
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      const session = await this.authService.refreshTokens(
+        this.refreshCookie.read(req),
+      );
+      return this.respondWithSession(res, session);
+    } catch (error) {
+      // A dead session must not keep a cookie around. Keep it when the request merely lost a race to a
+      // parallel refresh (the winner's Set-Cookie may already hold the new token) or on transient errors.
+      if (
+        error instanceof UnauthorizedException &&
+        !(error instanceof SessionSupersededException)
+      ) {
+        this.refreshCookie.clear(res);
+      }
+      throw error;
+    }
   }
 
   @AllowDuringOnboarding()
@@ -81,8 +130,12 @@ export class AuthController {
   async onboard(
     @CurrentUser('id') userId: string,
     @Body() dto: OnboardStaffDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.onboard(userId, dto);
+    return this.respondWithSession(
+      res,
+      await this.authService.onboard(userId, dto),
+    );
   }
 
   @Get('handover/candidates')
@@ -108,7 +161,7 @@ export class AuthController {
       'Revokes the current session and returns a new session for the incoming staff (same shape as login). ' +
       'The outgoing staff must close their cash drawer shift first.',
   })
-  @ApiResponse({ status: 200, description: '{ accessToken, refreshToken, user } of the incoming staff' })
+  @ApiResponse({ status: 200, description: '{ accessToken, user } of the incoming staff (Set-Cookie: their menuscan_rt)' })
   @ApiResponse({ status: 400, description: 'Wrong PIN, same staff, or incoming staff without PIN / onboarding' })
   @ApiResponse({ status: 404, description: 'Incoming staff not found, inactive, or ADMIN' })
   @ApiResponse({ status: 409, description: 'Outgoing staff still has an open cash drawer shift (code SHIFT_STILL_OPEN)' })
@@ -116,8 +169,12 @@ export class AuthController {
   async handover(
     @CurrentUser('id') userId: string,
     @Body() dto: HandoverDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.handover(userId, dto);
+    return this.respondWithSession(
+      res,
+      await this.authService.handover(userId, dto),
+    );
   }
 
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -141,14 +198,25 @@ export class AuthController {
     return this.authService.verifyPin(userId, dto);
   }
 
-  @AllowDuringOnboarding()
+  @Public()
+  @UseGuards(CookieCsrfGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Logout and revoke refresh token' })
-  @ApiResponse({ status: 200, description: 'Logged out successfully' })
-  async logout(@CurrentUser('id') userId: string) {
-    return this.authService.logout(userId);
+  @ApiOperation({
+    summary: 'Logout: revoke this session and clear the refresh cookie',
+    description:
+      'Revokes exactly the session whose refresh cookie is sent (only if it is still the current one), and always ' +
+      'clears menuscan_rt. No access token needed. Requires an allowed Origin and Content-Type: application/json.',
+  })
+  @ApiResponse({ status: 200, description: 'Logged out (cookie cleared)' })
+  @ApiResponse({ status: 403, description: 'Origin not allowed or Content-Type is not application/json' })
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const refreshToken = this.refreshCookie.read(req);
+    this.refreshCookie.clear(res);
+    return this.authService.logout(refreshToken);
   }
 
   @AllowDuringOnboarding()

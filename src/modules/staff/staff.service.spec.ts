@@ -106,12 +106,25 @@ describe('StaffService', () => {
     expect(result.success).toBe(true);
   });
 
+  it('update with isActive=false ends the staff session; other updates leave it alone', async () => {
+    await service.update('user-123', { isActive: false } as any);
+    expect(prisma.user.update.mock.calls[0][0].data).toMatchObject({
+      isActive: false,
+      refreshToken: null,
+    });
+
+    prisma.user.update.mockClear();
+    await service.update('user-123', { name: 'Nama Baru' } as any);
+    expect(prisma.user.update.mock.calls[0][0].data).not.toHaveProperty('refreshToken');
+  });
+
   it('remove should soft delete staff', async () => {
     const result = await service.remove('user-123');
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'user-123' },
-        data: expect.objectContaining({ isActive: false }),
+        // Removing staff also ends their session (refresh token revoked)
+        data: expect.objectContaining({ isActive: false, refreshToken: null }),
       })
     );
     expect(result.success).toBe(true);

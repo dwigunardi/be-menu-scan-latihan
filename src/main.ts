@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as express from 'express';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import { getAllowedOrigins } from './config/cors-origins';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -22,7 +24,6 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.PORT') || 3000;
-  const frontendUrl = configService.get<string>('app.FRONTEND_URL') || 'http://localhost:3000';
 
   // Serve static uploaded assets securely with nosniff header
   const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -47,6 +48,9 @@ async function bootstrap() {
     }),
   );
 
+  // Parses the HttpOnly refresh-token cookie (menuscan_rt) for /auth/refresh and /auth/logout
+  app.use(cookieParser());
+
   // Global Prefix
   app.setGlobalPrefix('api/v1', {
     exclude: ['api/docs', 'health', 'uploads/(.*)'],
@@ -54,7 +58,7 @@ async function bootstrap() {
 
   // Enable CORS
   app.enableCors({
-    origin: [frontendUrl, 'http://localhost:3000', 'http://localhost:3001'],
+    origin: getAllowedOrigins(configService),
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: [

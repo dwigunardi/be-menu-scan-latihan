@@ -6,6 +6,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
@@ -13,6 +14,8 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EcdhService } from '../../common/crypto/ecdh.service';
 import { PinVerificationService } from '../../common/security/pin-verification.service';
+import { hashRefreshToken, refreshTokenMatches } from './refresh-token-hash';
+import { SessionSupersededException } from './session-superseded.exception';
 import { HandshakeDto } from './dto/handshake.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
@@ -96,7 +99,7 @@ export class AuthService {
     );
 
     // Hash refresh token before saving in DB for revocation tracking
-    const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
+    const refreshTokenHash = hashRefreshToken(tokens.refreshToken);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { refreshToken: refreshTokenHash },
@@ -174,7 +177,7 @@ export class AuthService {
       false,
     );
 
-    const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
+    const refreshTokenHash = hashRefreshToken(tokens.refreshToken);
     await this.prisma.user.update({
       where: { id: updatedUser.id },
       data: { refreshToken: refreshTokenHash },
@@ -204,23 +207,38 @@ export class AuthService {
   }
 
   /**
-   * Refresh Access & Refresh Tokens
+   * Refresh Access & Refresh Tokens from the refresh token in the HttpOnly cookie.
+   * Verifies the JWT, matches it against the stored hash, then rotates it.
    */
-  async refreshTokens(userId: string, refreshToken: string) {
+  async refreshTokens(refreshToken: string | undefined) {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
+    }
+
+    let payload: { sub?: string };
+    try {
+      payload = await this.jwtService.verifyAsync(refreshToken, {
+        secret: this.refreshSecret(),
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: payload.sub },
     });
 
-    if (!user || !user.refreshToken) {
+    // Deactivated or deleted staff lose their session immediately, like at login
+    if (!user || !user.refreshToken || !user.isActive || user.deletedAt) {
       throw new UnauthorizedException('Access denied. No active session.');
     }
 
-    const isRefreshTokenValid = await bcrypt.compare(
-      refreshToken,
-      user.refreshToken,
-    );
-    if (!isRefreshTokenValid) {
-      throw new UnauthorizedException('Invalid or revoked refresh token');
+    if (!refreshTokenMatches(refreshToken, user.refreshToken)) {
+      // Rotated by a parallel refresh or replaced by a newer login: 401, but keep the browser's cookie
+      throw new SessionSupersededException('Invalid or revoked refresh token');
     }
 
     const tokens = await this.generateTokens(
@@ -231,7 +249,7 @@ export class AuthService {
       user.needsOnboarding,
     );
 
-    const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
+    const refreshTokenHash = hashRefreshToken(tokens.refreshToken);
     // Conditional rotation: only replace the exact hash we verified. If a logout, shift handover or another
     // refresh changed it meanwhile (two bcrypt calls make that window ~100ms+), a plain update would
     // resurrect a revoked session or overwrite a newer one.
@@ -245,7 +263,9 @@ export class AuthService {
         userId: user.id,
         msg: 'Refresh token was revoked or rotated during refresh; no tokens issued',
       });
-      throw new UnauthorizedException('Session was revoked or refreshed elsewhere');
+      throw new SessionSupersededException(
+        'Session was revoked or refreshed elsewhere',
+      );
     }
 
     this.logger.log({
@@ -259,18 +279,41 @@ export class AuthService {
   }
 
   /**
-   * Logout user by clearing refreshToken in database
+   * Logout: revokes exactly the session whose refresh token is presented (the HttpOnly cookie), and nothing
+   * else. With one session per user, revoking by user id would let a stale or late request (an old device,
+   * a delayed logout after the user logged in again, a rotated-out or leaked token) kill the user's
+   * current session. The controller always clears the cookie.
    */
-  async logout(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: null },
-    });
+  async logout(refreshToken: string | undefined) {
+    let revokedUserId: string | null = null;
+
+    if (refreshToken) {
+      let sub: string | undefined;
+      try {
+        // Expiry is ignored: an expired token whose hash is still stored is still that exact session
+        ({ sub } = await this.jwtService.verifyAsync<{ sub?: string }>(
+          refreshToken,
+          { secret: this.refreshSecret(), ignoreExpiration: true },
+        ));
+      } catch {
+        sub = undefined; // unverifiable: nothing to revoke
+      }
+
+      if (sub) {
+        const result = await this.prisma.user.updateMany({
+          where: { id: sub, refreshToken: hashRefreshToken(refreshToken) },
+          data: { refreshToken: null },
+        });
+        if (result.count > 0) revokedUserId = sub;
+      }
+    }
 
     this.logger.log({
       step: 'AUTH_LOGOUT',
-      userId,
-      msg: `User ${userId} logged out successfully`,
+      userId: revokedUserId,
+      msg: revokedUserId
+        ? `Session revoked for user ${revokedUserId}`
+        : 'Logout without a current session cookie; cookie cleared only',
     });
 
     return {
@@ -431,7 +474,7 @@ export class AuthService {
       incoming.role,
       incoming.needsOnboarding,
     );
-    const refreshTokenHash = await bcrypt.hash(tokens.refreshToken, 10);
+    const refreshTokenHash = hashRefreshToken(tokens.refreshToken);
 
     // Revoke the outgoing session and start the incoming one together
     await this.prisma.$transaction([
@@ -481,19 +524,13 @@ export class AuthService {
   ) {
     const payload = { sub: userId, email, name, role, needsOnboarding };
 
-    const accessSecret =
-      this.configService.get<string>('app.JWT_ACCESS_SECRET') ||
-      this.configService.get<string>('JWT_ACCESS_SECRET') ||
-      'default_jwt_access_secret_16';
+    const accessSecret = this.accessSecret();
     const accessExpiresIn =
       this.configService.get<string>('app.JWT_ACCESS_EXPIRES_IN') ||
       this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ||
       '15m';
 
-    const refreshSecret =
-      this.configService.get<string>('app.JWT_REFRESH_SECRET') ||
-      this.configService.get<string>('JWT_REFRESH_SECRET') ||
-      'default_jwt_refresh_secret_16';
+    const refreshSecret = this.refreshSecret();
     const refreshExpiresIn =
       this.configService.get<string>('app.JWT_REFRESH_EXPIRES_IN') ||
       this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
@@ -504,15 +541,35 @@ export class AuthService {
         secret: accessSecret,
         expiresIn: accessExpiresIn as any,
       }),
-      this.jwtService.signAsync(payload, {
-        secret: refreshSecret,
-        expiresIn: refreshExpiresIn as any,
-      }),
+      // jti makes every refresh token unique, even when issued in the same second as the previous one
+      this.jwtService.signAsync(
+        { ...payload, jti: randomUUID() },
+        {
+          secret: refreshSecret,
+          expiresIn: refreshExpiresIn as any,
+        },
+      ),
     ]);
 
     return {
       accessToken,
       refreshToken,
     };
+  }
+
+  private accessSecret(): string {
+    return (
+      this.configService.get<string>('app.JWT_ACCESS_SECRET') ||
+      this.configService.get<string>('JWT_ACCESS_SECRET') ||
+      'default_jwt_access_secret_16'
+    );
+  }
+
+  private refreshSecret(): string {
+    return (
+      this.configService.get<string>('app.JWT_REFRESH_SECRET') ||
+      this.configService.get<string>('JWT_REFRESH_SECRET') ||
+      'default_jwt_refresh_secret_16'
+    );
   }
 }
