@@ -78,3 +78,34 @@ export const LeaveResponseSchema = z.object({
   success: z.boolean(),
   message: z.string(),
 });
+
+// Kiosk roster: what the attendance kiosk (ADMIN, CASHIER) needs, without staff contact details
+export const KioskRosterItemSchema = z.object({
+  id: z.string(),
+  employeeId: z.string().nullable(),
+  name: z.string(),
+  role: z.enum(['ADMIN', 'CASHIER', 'KITCHEN', 'WAITER']),
+  avatarUrl: z.string().nullable(),
+  hasPin: z.boolean(),
+  /** Today's attendance (WIB date), or null when the staff has no record today. */
+  today: z
+    .object({
+      attendanceId: z.string(),
+      clockInTime: z.string().nullable(), // ISO datetime
+      clockOutTime: z.string().nullable(), // ISO datetime
+      status: z.enum([
+        'ON_TIME',
+        'LATE',
+        'EARLY_LEAVE',
+        'COMPLETED',
+        'SICK',
+        'LEAVE',
+        'ABSENT',
+      ]),
+    })
+    .nullable(),
+});
+
+export const KioskRosterResponseSchema = z.array(KioskRosterItemSchema);
+
+export type KioskRosterItem = z.infer<typeof KioskRosterItemSchema>;

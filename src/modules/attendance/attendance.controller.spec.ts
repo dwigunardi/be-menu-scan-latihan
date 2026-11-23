@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from './attendance.service';
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { AttendanceStatus, LeaveType, LeaveStatus, UserRole } from '@prisma/client';
 
 describe('AttendanceController', () => {
@@ -141,6 +142,23 @@ describe('AttendanceController', () => {
       await controller.correctAttendance('att-1', dto, 'admin-1');
 
       expect(service.correctClockOut).toHaveBeenCalledWith('att-1', dto, 'admin-1');
+    });
+  });
+
+  describe('getKioskRoster', () => {
+    it('delegates to the service', async () => {
+      service.getKioskRoster = jest.fn().mockResolvedValue([]);
+
+      await expect(controller.getKioskRoster()).resolves.toEqual([]);
+      expect(service.getKioskRoster).toHaveBeenCalled();
+    });
+
+    it('is open to ADMIN and CASHIER only (the kiosk roles)', () => {
+      const roles = Reflect.getMetadata(
+        ROLES_KEY,
+        AttendanceController.prototype.getKioskRoster,
+      );
+      expect(roles).toEqual([UserRole.ADMIN, UserRole.CASHIER]);
     });
   });
 });
