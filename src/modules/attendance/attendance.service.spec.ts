@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AttendanceService } from './attendance.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PinVerificationService } from '../../common/security/pin-verification.service';
 import { NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { AttendanceStatus, LeaveType, LeaveStatus, UserRole } from '@prisma/client';
@@ -23,6 +24,8 @@ describe('AttendanceService', () => {
     isActive: true,
     avatarUrl: null,
     dailyShiftHours: 8,
+    pinFailedAttempts: 0,
+    pinLockedUntil: null as Date | null,
   };
 
   // Full attendance row as returned by Prisma with ATTENDANCE_INCLUDE
@@ -80,6 +83,7 @@ describe('AttendanceService', () => {
       user: {
         findUnique: jest.fn(),
         count: jest.fn(),
+        update: jest.fn().mockResolvedValue({ pinFailedAttempts: 1 }),
       },
       branchSetting: {
         findFirst: jest.fn(),
@@ -100,6 +104,7 @@ describe('AttendanceService', () => {
       providers: [
         AttendanceService,
         { provide: PrismaService, useValue: prisma },
+        PinVerificationService,
       ],
     }).compile();
 
@@ -734,6 +739,47 @@ describe('AttendanceService', () => {
       });
       expect(result.items[0]).not.toHaveProperty('staff');
       expect(result.meta.totalItems).toBe(1);
+    });
+  });
+
+  describe('shared PIN lockout on clock-in/out', () => {
+    const clockIn = () =>
+      service.recordClockIn({
+        staffId: 'staff-1',
+        pinCode: '1234',
+        latitude: -6.2297465,
+        longitude: 106.8557342,
+      });
+
+    it('refuses clock-in with 429 while the PIN is locked (e.g. by kiosk-exit attempts)', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...mockStaff,
+        pinLockedUntil: new Date(Date.now() + 2 * 60_000),
+      });
+
+      const error = await clockIn().catch((e) => e);
+
+      expect(error.getStatus()).toBe(429);
+      expect(prisma.attendance.upsert).not.toHaveBeenCalled();
+    });
+
+    it('counts a wrong clock-in PIN toward the shared lockout', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockStaff);
+      prisma.branchSetting.findFirst.mockResolvedValue(mockBranch);
+
+      await expect(
+        service.recordClockIn({
+          staffId: 'staff-1',
+          pinCode: '9999',
+          latitude: -6.2297465,
+          longitude: 106.8557342,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'staff-1' },
+        data: { pinFailedAttempts: { increment: 1 } },
+        select: { pinFailedAttempts: true },
+      });
     });
   });
 });

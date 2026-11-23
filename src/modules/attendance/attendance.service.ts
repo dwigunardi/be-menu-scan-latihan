@@ -5,8 +5,8 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PinVerificationService } from '../../common/security/pin-verification.service';
 import { ClockInDto } from './dto/clock-in.dto';
 import { ClockOutDto } from './dto/clock-out.dto';
 import { CreateLeaveRequestDto } from './dto/create-leave-request.dto';
@@ -36,7 +36,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pinVerification: PinVerificationService,
+  ) {}
 
   /**
    * Tanggal hari ini (YYYY-MM-DD) menurut WIB, bukan UTC: presensi jam 00:00–07:00 WIB tetap masuk hari ini
@@ -68,8 +71,12 @@ export class AttendanceService {
       throw new BadRequestException('PIN presensi belum diatur untuk staf ini. Hubungi admin.');
     }
 
-    // 2. Verifikasi PIN dengan bcrypt
-    const isPinMatch = await bcrypt.compare(dto.pinCode, staff.pinCode);
+    // 2. Verifikasi PIN (lockout dibagi dengan verify-pin kiosk)
+    const isPinMatch = await this.pinVerification.verify(
+      { ...staff, pinCode: staff.pinCode },
+      dto.pinCode,
+      'CLOCK_IN',
+    );
     if (!isPinMatch) {
       throw new BadRequestException('PIN presensi salah. Masukkan 4-digit PIN yang valid.');
     }
@@ -172,7 +179,11 @@ export class AttendanceService {
       throw new BadRequestException('PIN presensi belum diatur untuk staf ini');
     }
 
-    const isPinMatch = await bcrypt.compare(dto.pinCode, staff.pinCode);
+    const isPinMatch = await this.pinVerification.verify(
+      { ...staff, pinCode: staff.pinCode },
+      dto.pinCode,
+      'CLOCK_OUT',
+    );
     if (!isPinMatch) {
       throw new BadRequestException('PIN presensi salah. Masukkan 4-digit PIN yang valid.');
     }

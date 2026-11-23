@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EcdhService } from '../../common/crypto/ecdh.service';
+import { PinVerificationService } from '../../common/security/pin-verification.service';
 import {
   UnauthorizedException,
   NotFoundException,
@@ -76,6 +77,7 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         { provide: EcdhService, useValue: ecdhService },
+        PinVerificationService,
       ],
     }).compile();
 

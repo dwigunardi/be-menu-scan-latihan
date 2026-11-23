@@ -4,8 +4,6 @@ import {
   BadRequestException,
   Logger,
   NotFoundException,
-  HttpException,
-  HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -13,13 +11,16 @@ import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EcdhService } from '../../common/crypto/ecdh.service';
+import { PinVerificationService } from '../../common/security/pin-verification.service';
 import { HandshakeDto } from './dto/handshake.dto';
 import { LoginDto } from './dto/login.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
 import { VerifyPinDto, VerifyPinResponse } from './dto/verify-pin.dto';
 
-export const PIN_MAX_ATTEMPTS = 5;
-export const PIN_LOCK_MINUTES = 5;
+export {
+  PIN_MAX_ATTEMPTS,
+  PIN_LOCK_MINUTES,
+} from '../../common/security/pin-verification.service';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly ecdhService: EcdhService,
+    private readonly pinVerification: PinVerificationService,
   ) {}
 
   /**
@@ -301,8 +303,8 @@ export class AuthService {
 
   /**
    * Verifies the logged-in user's own PIN (kiosk exit). A wrong PIN is `{ valid: false }`, never 401,
-   * because 401 means an expired session to the FE. After PIN_MAX_ATTEMPTS consecutive failures the
-   * user is locked out for PIN_LOCK_MINUTES (429), and the PIN is not checked at all while locked.
+   * because 401 means an expired session to the FE. Lockout (429) is shared with clock-in/out, see
+   * PinVerificationService.
    */
   async verifyPin(userId: string, dto: VerifyPinDto): Promise<VerifyPinResponse> {
     const user = await this.prisma.user.findUnique({
@@ -320,64 +322,12 @@ export class AuthService {
       return { valid: false };
     }
 
-    const now = new Date();
-    if (user.pinLockedUntil && user.pinLockedUntil > now) {
-      throw this.pinLockedException(user.pinLockedUntil, now);
-    }
-
-    const isPinValid = await bcrypt.compare(dto.pinCode, user.pinCode);
-
-    if (isPinValid) {
-      if (user.pinFailedAttempts > 0 || user.pinLockedUntil) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { pinFailedAttempts: 0, pinLockedUntil: null },
-        });
-      }
-      this.logger.log({ step: 'PIN_VERIFY_SUCCESS', userId, msg: 'Staff PIN verified' });
-      return { valid: true };
-    }
-
-    // Atomic increment so concurrent wrong attempts are all counted
-    const { pinFailedAttempts } = await this.prisma.user.update({
-      where: { id: userId },
-      data: { pinFailedAttempts: { increment: 1 } },
-      select: { pinFailedAttempts: true },
-    });
-
-    if (pinFailedAttempts >= PIN_MAX_ATTEMPTS) {
-      const lockedUntil = new Date(now.getTime() + PIN_LOCK_MINUTES * 60_000);
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { pinFailedAttempts: 0, pinLockedUntil: lockedUntil },
-      });
-      this.logger.warn({
-        step: 'PIN_VERIFY_LOCKED',
-        userId,
-        lockedUntil: lockedUntil.toISOString(),
-        msg: `PIN verification locked after ${PIN_MAX_ATTEMPTS} consecutive failures`,
-      });
-      throw this.pinLockedException(lockedUntil, now);
-    }
-
-    this.logger.warn({
-      step: 'PIN_VERIFY_FAILED',
-      userId,
-      failedAttempts: pinFailedAttempts,
-      msg: 'Wrong staff PIN',
-    });
-    return { valid: false };
-  }
-
-  private pinLockedException(lockedUntil: Date, now: Date): HttpException {
-    const minutes = Math.max(
-      1,
-      Math.ceil((lockedUntil.getTime() - now.getTime()) / 60_000),
+    const valid = await this.pinVerification.verify(
+      { ...user, pinCode: user.pinCode },
+      dto.pinCode,
+      'KIOSK_EXIT',
     );
-    return new HttpException(
-      `Terlalu banyak percobaan PIN. Coba lagi dalam ${minutes} menit.`,
-      HttpStatus.TOO_MANY_REQUESTS,
-    );
+    return { valid };
   }
 
   /**
