@@ -90,7 +90,7 @@ Setelah diperbarui, salin ulang ke `fe/docs/be/`.
 - [x] `PATCH /admin/attendance/:id/overtime` (2026-11-21, lihat bagian 7)
 - [x] `PATCH /admin/attendance/:id/correction` (2026-11-21, lihat bagian 7)
 - [x] Respons semua endpoint presensi diselaraskan dengan schema FE (2026-11-21, lihat bagian 7)
-- [ ] Audit `RolesGuard` di semua controller `admin/*`
+- [x] Audit `RolesGuard` di semua controller `admin/*` (2026-11-21, lihat bagian 8)
 - [ ] Sinkronkan `docs/integration/frontend-integration-guide.md`
 - [ ] Beri kabar ke FE setelah selesai (update shift & pembayaran sudah dikirim 2026-11-21; sisanya menyusul), supaya `fe/docs/fe/integration/api-endpoints.md` diperbarui
 
@@ -167,3 +167,26 @@ Catatan field `AttendanceItem`:
 ### Catatan kecil untuk FE
 
 - `AttendanceCorrectionModal` memakai `attendance.clockOutTime` langsung sebagai nilai awal input `type="time"`. Karena nilainya ISO datetime, input akan kosong; format dulu ke `HH:mm` WIB.
+
+---
+
+## 8. Update backend 2026-11-21: hasil audit role & keamanan
+
+Ada di branch lokal `feat/cashier-shift-payment`, belum di-push.
+
+### Jawaban untuk pertanyaan di bagian 3 nomor 1
+
+- **Kasir membuka KDS**: KDS memakai `GET /admin/orders` dan `PUT /admin/orders/:id/status`, yang memang boleh diakses kasir. Tidak ada perubahan di backend.
+- **CRUD meja & zona oleh kasir**: di API, create/update/delete meja dan zona khusus ADMIN. Kasir hanya boleh melihat dan `POST /admin/tables/:id/reset`. Tombol CRUD di halaman meja kasir sebaiknya disembunyikan di FE karena akan dibalas `403`.
+
+### Perubahan perilaku yang perlu ditangani FE
+
+1. **`PUT /admin/orders/:id/status` ke `PAID` atau `CANCELLED` hanya untuk ADMIN dan CASHIER.** KITCHEN dan WAITER dibalas `403` ("Hanya Admin atau Kasir yang dapat mengubah status order menjadi ..."). Status lain (`PENDING`, `PREPARING`, `SERVED`) tetap boleh semua role. Sembunyikan tombol bayar/batal untuk KITCHEN dan WAITER.
+2. **`DELETE /admin/tables/:id` sekarang khusus ADMIN** (sebelumnya terbuka untuk semua staf karena tidak ada `@Roles`).
+3. **Lockout PIN dipakai bersama** oleh `POST /auth/verify-pin`, `POST /admin/attendance/clock-in`, dan `clock-out`. Lima PIN salah berturut-turut di endpoint mana pun mengunci PIN staf itu 5 menit di ketiganya. Clock-in/out saat terkunci dibalas `429` "Terlalu banyak percobaan PIN. Coba lagi dalam X menit." PIN salah di clock-in/out tetap `400`.
+4. **Route `admin/*` tanpa `@Roles` sekarang ditolak (`403`) secara default.** Semua route yang ada sudah punya `@Roles`; ini hanya mencegah route baru terbuka tanpa sengaja.
+
+### Perbaikan lain (tidak mengubah kontrak FE)
+
+- **Webhook pembayaran**: `signatureKey: "test_bypass_key"` hanya diterima di luar production. Di production, aplikasi menolak start jika `PAYMENT_WEBHOOK_SECRET` masih nilai default yang ada di repo. Signature dibandingkan secara constant-time.
+- **`@ZodResponse` sekarang juga berlaku untuk respons terenkripsi** (temuan FE): schema diterapkan sebelum enkripsi. Format amplop terenkripsi tidak berubah.

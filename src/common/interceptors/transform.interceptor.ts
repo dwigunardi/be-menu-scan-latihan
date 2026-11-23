@@ -11,6 +11,7 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { z } from 'zod';
 import { ZOD_RESPONSE_KEY } from '../decorators/zod-response.decorator';
+import { applyResponseSchema } from './response-schema.util';
 
 export interface StandardResponse<T> {
   success: boolean;
@@ -46,19 +47,12 @@ export class TransformInterceptor<T>
 
         // Apply Backend Response Hardening & Field Stripping if schema is attached
         if (responseSchema && rawData !== null && rawData !== undefined) {
-          const parsed = responseSchema.safeParse(rawData);
-          if (!parsed.success) {
-            this.logger.warn({
-              step: 'RESPONSE_SCHEMA_VALIDATION_WARNING',
-              handler: context.getHandler().name,
-              errors: parsed.error.issues,
-              msg: 'Outgoing response has fields that did not match Zod schema. Passing sanitized or raw data.',
-            });
-            // Still pass sanitized data if partial or fallback to raw
-            processedData = parsed.data ?? rawData;
-          } else {
-            processedData = parsed.data;
-          }
+          processedData = applyResponseSchema(
+            responseSchema,
+            rawData,
+            this.logger,
+            context.getHandler().name,
+          );
         }
 
         return {
