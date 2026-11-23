@@ -27,6 +27,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { ShiftsModule } from './modules/shifts/shifts.module';
+import { throttlerErrorMessage } from './common/security/throttler-message';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -37,12 +38,15 @@ import { AppService } from './app.service';
       isGlobal: true,
       load: [appConfig],
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 100,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60000,
+          limit: 100,
+        },
+      ],
+      errorMessage: throttlerErrorMessage,
+    }),
     AppLoggerModule,
     PrismaModule,
     CryptoModule,

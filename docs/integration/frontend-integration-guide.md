@@ -703,7 +703,7 @@ Format error (selalu plain JSON):
 - `code` hanya ada pada error yang punya kode mesin. Saat ini: `SHIFT_NOT_OPEN` (bayar tunai tanpa shift kasir terbuka). Cek `code`, jangan teks `message`.
 - `details` hanya ada pada error validasi (`400`), berisi daftar `{ "field", "message" }` per field yang gagal.
 - `401` berarti sesi/token tidak valid (memicu refresh token). PIN salah **tidak pernah** dibalas `401`.
-- `429` berarti rate limit per IP, atau PIN staf sedang terkunci (pesan menyebut sisa menit).
+- `429` berarti rate limit per IP (pesan "Terlalu banyak permintaan. Coba lagi dalam X detik." plus header `Retry-After` dalam detik), atau PIN staf sedang terkunci (pesan menyebut sisa menit). Tampilkan `message` dari backend apa adanya.
 
 ---
 
