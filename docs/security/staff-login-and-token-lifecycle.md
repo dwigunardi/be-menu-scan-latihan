@@ -4,6 +4,7 @@
 > **Sistem**: MenuScan Staff Portal & Order Management  
 > **Lingkup**: Frontend (Next.js 15, Zustand, React Query) & Backend (NestJS 11, Passport JWT, Prisma ORM, Redis)  
 > **Tujuan**: Menjelaskan seluruh alur login, siklus hidup dual-token JWT, silent auto-refresh, serta modal pemulihan sesi kedaluwarsa tanpa kehilangan data kerja.
+> **Rencana perubahan**: refresh token akan dipindah dari `localStorage` ke cookie `HttpOnly`; lihat [refresh-token-httponly-cookie-plan.md](./refresh-token-httponly-cookie-plan.md). Dokumen ini masih menggambarkan alur saat ini.
 
 ---
 
