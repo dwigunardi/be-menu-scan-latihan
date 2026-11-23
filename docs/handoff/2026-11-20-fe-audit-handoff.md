@@ -91,7 +91,7 @@ Setelah diperbarui, salin ulang ke `fe/docs/be/`.
 - [x] `PATCH /admin/attendance/:id/correction` (2026-11-21, lihat bagian 7)
 - [x] Respons semua endpoint presensi diselaraskan dengan schema FE (2026-11-21, lihat bagian 7)
 - [x] Audit `RolesGuard` di semua controller `admin/*` (2026-11-21, lihat bagian 8)
-- [ ] Sinkronkan `docs/integration/frontend-integration-guide.md`
+- [x] Sinkronkan `docs/integration/frontend-integration-guide.md` (2026-11-23; juga `docs/architecture/api-contract-and-security-guidelines.md`, `docs/architecture/staff-and-attendance-blueprint.md`, `docs/roadmap/implementation-milestones.md`). Salinan ke `fe/docs/be/` dikerjakan di repo FE.
 - [ ] Beri kabar ke FE setelah selesai (update shift & pembayaran sudah dikirim 2026-11-21; sisanya menyusul), supaya `fe/docs/fe/integration/api-endpoints.md` diperbarui
 
 ---

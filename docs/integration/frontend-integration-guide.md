@@ -74,10 +74,18 @@ graph TD
     Token --> RolesGuard{"RolesGuard Verification"}
 
     RolesGuard -->|👑 ADMIN| AccessAdmin["Full Access: CMS Menus, Pricing, Banners, Staff, Table Layout, Financial Reports"]
-    RolesGuard -->|💵 CASHIER| AccessCashier["POS Floor Plan, Confirm Cash PAID, Print Receipts"]
-    RolesGuard -->|👨‍🍳 KITCHEN| AccessKitchen["KDS Kanban Board (Hanya Masak Order PAID), Fast Toggle Out-of-Stock"]
+    RolesGuard -->|💵 CASHIER| AccessCashier["POS Floor Plan, Buka/Tutup Shift & Z-Report, Konfirmasi PAID, Batalkan Order"]
+    RolesGuard -->|👨‍🍳 KITCHEN| AccessKitchen["KDS Kanban Board (PREPARING / SERVED), Fast Toggle Out-of-Stock"]
     RolesGuard -->|🤵 WAITER| AccessWaiter["Mobile Staff View: Deliver Ready Orders, Clean Dishes & Reset Table to VACANT"]
 ```
+
+Aturan penting (disinkronkan dengan kode 2026-11-23):
+
+- **Role per endpoint** tercantum di [API Contract & Security Guidelines, bagian 4](../architecture/api-contract-and-security-guidelines.md#4-matriks-kontrak-seluruh-api-endpoints). Proteksi halaman di FE hanya kenyamanan UI; backend tetap memeriksa role di setiap request.
+- **Route `admin/*` tanpa `@Roles` ditolak (`403`) secara default.**
+- **Hanya `ADMIN` dan `CASHIER` yang boleh mengubah order ke `PAID` atau `CANCELLED`.** KITCHEN dan WAITER dibalas `403`, tetapi tetap boleh `PENDING`/`PREPARING`/`SERVED`. Sembunyikan tombol bayar/batal untuk dua role ini.
+- **CRUD meja & zona khusus `ADMIN`.** Kasir dan waiter hanya boleh melihat meja dan `POST /admin/tables/:id/reset`.
+- **Shift kasir** (`/admin/shifts/*`) untuk `ADMIN` dan `CASHIER`.
 
 ---
 
@@ -651,7 +659,7 @@ socket.on('order:status_changed', (payload) => {
 │    (Role: ADMIN)                   │ • Recent Orders Table & Top Selling Products Today               │
 ├────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
 │ 2. 🍳 Layar B: Kitchen Display KDS │ • Kanban 3 Kolom: [MASUK / PAID 🟡] ➔ [PREPARING 🔵] ➔ [SERVED 🟢] │
-│    (Role: ADMIN, KITCHEN, WAITER)  │ • Dapur HANYA memasak pesanan yang sudah berstatus PAID          │
+│  (ADMIN, KITCHEN, CASHIER, WAITER) │ • Dapur HANYA memasak pesanan yang sudah berstatus PAID          │
 ├────────────────────────────────────┼──────────────────────────────────────────────────────────────────┤
 │ 3. 📍 Layar C: Floor Plan & Meja   │ • Grid visual meja: 🟢 VACANT | 🟡 OCCUPIED (Sedang Makan)       │
 │    (Role: ADMIN, CASHIER, WAITER)  │ • Waiter 1-Tap Reset Meja ke VACANT saat tamu selesai            │
@@ -677,6 +685,25 @@ socket.on('order:status_changed', (payload) => {
   "data": { ... }
 }
 ```
+
+Jika request membawa `x-handshake-token`, body sukses adalah amplop terenkripsi `{ "encrypted": true, "iv", "tag", "payload" }` (tidak dibungkus `{ success, data }`). Jika `data` kosong (`null`), respons dikirim plain.
+
+Format error (selalu plain JSON):
+
+```json
+{
+  "statusCode": 409,
+  "error": "Conflict",
+  "message": "Belum ada shift kasir yang dibuka. Buka shift terlebih dahulu sebelum menerima pembayaran tunai.",
+  "code": "SHIFT_NOT_OPEN",
+  "timestamp": "2026-11-21T03:00:00.000Z"
+}
+```
+
+- `code` hanya ada pada error yang punya kode mesin. Saat ini: `SHIFT_NOT_OPEN` (bayar tunai tanpa shift kasir terbuka). Cek `code`, jangan teks `message`.
+- `details` hanya ada pada error validasi (`400`), berisi daftar `{ "field", "message" }` per field yang gagal.
+- `401` berarti sesi/token tidak valid (memicu refresh token). PIN salah **tidak pernah** dibalas `401`.
+- `429` berarti rate limit per IP, atau PIN staf sedang terkunci (pesan menyebut sisa menit).
 
 ---
 
@@ -747,12 +774,21 @@ $$\text{Item Subtotal} = \text{Item Unit Price} \times \text{Quantity}$$
 stateDiagram-v2
     direction LR
     [*] --> PENDING : Checkout di HP
-    PENDING --> PAID : Bayar QRIS / Kasir
+    PENDING --> PAID : Webhook QRIS / Kasir (ADMIN, CASHIER)
     PAID --> PREPARING : Koki Mulai Masak
     PREPARING --> SERVED : Waiter Antar ke Meja
     SERVED --> [*] : Tamu Nikmati Hidangan & Ulasan ⭐
-    PENDING --> CANCELLED : Batal Bayar
+    PENDING --> CANCELLED : QR kedaluwarsa / Batal (ADMIN, CASHIER)
 ```
+
+**Status pembayaran tidak sama dengan `status`.** Setelah dibayar, order lanjut ke `PREPARING`/`SERVED`, jadi `status === 'PAID'` bukan penanda "sudah dibayar":
+
+- **Sudah dibayar** = `paidAt` terisi dan `status` bukan `CANCELLED`. Dashboard, laporan omzet, menu terlaris, dan total shift memakai definisi ini.
+- **Satu pintu pembayaran**: kasir (`PUT /admin/orders/:id/status` dengan `status: PAID`) dan webhook gateway sama-sama lewat logika yang sama. `paidAt` hanya ditulis sekali, dan setiap pembayaran tercatat satu kali di ledger `payments`.
+- **`paymentMethod`** (`CASH` \| `QRIS`, opsional, default `CASH`). Menandai `PAID` ulang dengan metode sama = `200` tanpa perubahan; metode berbeda = `409`.
+- **Tunai wajib ada shift kasir terbuka**, jika tidak `409` dengan `code: "SHIFT_NOT_OPEN"`. Arahkan kasir ke buka shift.
+- **Pembayaran gateway selalu masuk kelompok QRIS (non-tunai).** Webhook untuk order yang sudah dibayar dibalas `200` tanpa mengubah apa pun; webhook `EXPIRED`/`CANCEL` tidak membatalkan order yang sudah dibayar.
+- **`create-qris`** menolak (`409`) order yang sudah dibayar atau dibatalkan.
 
 #### 2. Siklus Meja (Table Lifecycle)
 ```mermaid
@@ -773,6 +809,9 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 1. Respon backend **divalidasi secara runtime** sebelum dikirim ke jaringan.
 2. Field internal atau sensitif dari database **secara otomatis dibersihkan / di-strip**.
 3. Struktur respon 100% konsisten dengan skema Zod di Frontend.
+4. Untuk respons terenkripsi, schema diterapkan **sebelum** enkripsi, jadi field ikut dibersihkan walaupun payload dienkripsi.
+
+Jika data tidak cocok dengan schema, backend tidak gagal: respons tetap dikirim (data mentah) dan log server mencatat `RESPONSE_SCHEMA_VALIDATION_WARNING`. Schema Zod di FE tetap menjadi penjaga terakhir.
 
 ---
 
@@ -786,6 +825,9 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 | 💵 **CASHIER** | `cashier@menuscan.com` | `cashier123` | Layar POS Floor Plan, Konfirmasi Bayar Cash (`PAID`), Fast Toggle Stok        |
 | 👨‍🍳 **KITCHEN** | `kitchen@menuscan.com` | `kitchen123` | Layar KDS Kanban Dapur (`PREPARING` $\rightarrow$ `SERVED`), Fast Toggle Stok |
 | 🤵 **WAITER**  | `waiter@menuscan.com`  | `waiter123`  | Layar Mobile Waiter (Antar `SERVED` & Reset Meja `VACANT`)                    |
+
+> [!NOTE]
+> Akun seed dibuat dengan `needsOnboarding: true`. Sebelum `POST /auth/onboard` (ganti password + set PIN), semua endpoint staf dibalas `403` oleh `OnboardingGuard`, kecuali `/auth/onboard`, `/auth/me`, dan `/auth/logout`. Endpoint public tidak terpengaruh.
 
 ---
 
@@ -811,17 +853,46 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 - **Refresh Token**: `POST /api/v1/auth/refresh`
 - **Staff Logout**: `POST /api/v1/auth/logout`
 - **Staff Profile Me**: `GET /api/v1/auth/me`
+- **Onboarding Pertama Kali**: `POST /api/v1/auth/onboard` (`{ "currentPassword", "newPassword", "pinCode" }`)
+- **Verifikasi PIN Keluar Kiosk**: `POST /api/v1/auth/verify-pin` (`{ "pinCode": "1234" }`) $\rightarrow$ `200 { "valid": true | false }`, tidak pernah `401`. 5x salah berturut-turut $\rightarrow$ `429` terkunci 5 menit (counter dibagi dengan clock-in/out).
 
 ---
 
 ### 4. Modul Admin & Staff Operations (KDS, Floor Plan, Menu)
 
-- **Live Orders Monitor (KDS / Kasir)**: `GET /api/v1/admin/orders?status=PAID`
-- **Update Status Pesanan**: `PATCH /api/v1/admin/orders/:id/status` (`{ "status": "PREPARING" | "SERVED" }`)
+Update order, menu, kategori, banner, dan meja menerima `PUT` maupun `PATCH` dengan body yang sama (FE memakai `PUT`). Endpoint lain hanya menerima method yang tertulis. Role lengkap per endpoint ada di [API Contract bagian 4B](../architecture/api-contract-and-security-guidelines.md#b-katalog-api-protected--admin--staff).
+
+**Order (KDS & Kasir)**
+- **Live Orders Monitor**: `GET /api/v1/admin/orders?status=PAID`
+- **Update Status Pesanan**: `PUT /api/v1/admin/orders/:id/status` (`{ "status": "PREPARING" | "SERVED" | "PAID" | "CANCELLED", "paymentMethod"?: "CASH" | "QRIS" }`). `PAID`/`CANCELLED` hanya `ADMIN` & `CASHIER` (lihat [8D](#d-state-machine-siklus-hidup-pesanan--meja)).
+
+**Shift Kasir & Z-Report** (`ADMIN`, `CASHIER`)
+- **Shift Aktif**: `GET /api/v1/admin/shifts/current` $\rightarrow$ shift + total live, atau `null`
+- **Buka Shift**: `POST /api/v1/admin/shifts/open` (`{ "openingCash": 200000, "notes"?: "..." }`) $\rightarrow$ `201`; `409` jika sudah ada shift terbuka
+- **Tutup Shift**: `POST /api/v1/admin/shifts/:id/close` (`{ "actualCash": 250000, "notes"?: "..." }`) $\rightarrow$ snapshot Z-Report (`expectedCash = openingCash + totalCashRevenue`, `cashVariance = actualCash − expectedCash`)
+- **Riwayat Shift**: `GET /api/v1/admin/shifts?page&limit&startDate&endDate&status`
+
+**Meja, Zona & Menu**
 - **Floor Plan Meja**: `GET /api/v1/admin/tables`
 - **1-Tap Reset Meja ke VACANT**: `POST /api/v1/admin/tables/:id/reset`
-- **Fast Toggle Ketersediaan Menu**: `PATCH /api/v1/admin/menus/:id/status` (`{ "isAvailable": false }`)
-- **Reordering Kategori**: `PATCH /api/v1/admin/categories/reorder`
+- **CRUD Meja & Zona** (`ADMIN`): `/api/v1/admin/tables[/:id]`, `/api/v1/admin/table-zones[/:id]`
+- **Fast Toggle Ketersediaan Menu**: `PUT /api/v1/admin/menus/:id/status` (`{ "isAvailable": false }`)
+- **Reordering Kategori**: `PUT /api/v1/admin/categories/reorder`
+- **Upload Gambar** (`ADMIN`): `POST /api/v1/admin/uploads/image` (`multipart/form-data`, field `file`)
+
+**Presensi** (detail: [Staff & Attendance Blueprint](../architecture/staff-and-attendance-blueprint.md))
+- **Clock-In / Clock-Out (kiosk)**: `POST /api/v1/admin/attendance/clock-in` | `clock-out` (`{ "staffId", "pinCode", "latitude", "longitude", "notes"? }`). PIN salah `400`, PIN terkunci `429`.
+- **Log Presensi**: `GET /api/v1/admin/attendance?page&limit&startDate&endDate&status&role&search` $\rightarrow$ `{ items: AttendanceItem[], meta }`
+- **Ringkasan Harian**: `GET /api/v1/admin/attendance/summary?date=YYYY-MM-DD`
+- **Izin / Sakit / Cuti**: `POST /api/v1/admin/attendance/leave` $\rightarrow$ `{ "success": true, "message" }`
+- **Review Lembur**: `PATCH /api/v1/admin/attendance/:id/overtime` (`{ "status": "APPROVED" | "REJECTED" | "OVERRIDDEN", "approvedMinutes"?, "notes"? }`)
+- **Koreksi Jam Pulang**: `PATCH /api/v1/admin/attendance/:id/correction` (`{ "clockOutTime": "18:30", "notes": "Lupa presensi pulang" }`)
+- `clockInTime`/`clockOutTime` di `AttendanceItem` adalah ISO datetime UTC; tampilkan sebagai jam WIB (`Asia/Jakarta`).
+
+**Staf & Pengaturan** (`ADMIN`, kecuali disebut lain)
+- **Staf**: `GET|POST /api/v1/admin/staff`, `GET|PUT|DELETE /api/v1/admin/staff/:id`, `PUT /api/v1/admin/staff/:id/pin` (sekaligus membuka lockout PIN)
+- **Pengaturan Cabang**: `GET /api/v1/admin/settings/branch` (semua role), `PUT /api/v1/admin/settings/branch`, `PUT /api/v1/admin/settings/branch/store-status` (`ADMIN`, `CASHIER`)
+- **Template Shift Kerja**: `GET /api/v1/admin/settings/shift-templates` (semua role), `POST`/`PUT`/`DELETE` `/api/v1/admin/settings/shift-templates[/:id]`, `POST /api/v1/admin/settings/shift-templates/seed-defaults`
 
 ---
 
@@ -830,3 +901,9 @@ Backend menerapkan decorator `@ZodResponse(schema)` pada controller. Hal ini mem
 - **Dashboard Overview (KPI, Recent Orders, Top Selling)**: `GET /api/v1/admin/reports/dashboard-overview`
 - **Laporan Pendapatan**: `GET /api/v1/admin/reports/revenue?startDate=2026-08-01&endDate=2026-08-31`
 - **Laporan Top Selling**: `GET /api/v1/admin/reports/top-selling?limit=5`
+
+Semantik angka laporan:
+
+- Omzet dan menu terlaris hanya menghitung order **sudah dibayar** (`paidAt` terisi, bukan `CANCELLED`), termasuk yang sudah `PREPARING`/`SERVED`, dan diberi tanggal menurut `paidAt`.
+- "Hari ini" dan filter tanggal mengikuti hari **WIB**. `startDate`/`endDate` boleh `YYYY-MM-DD` (seluruh hari WIB) atau ISO datetime dengan offset; nilai lain dibalas `400`.
+- Rincian jumlah order per status (`ordersByStatus`) memakai rentang tanggal yang sama berdasarkan `createdAt`.

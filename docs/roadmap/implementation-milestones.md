@@ -17,6 +17,7 @@
 | **Phase 3** | Feature Domain Modules (Business Logic) | ✅ **DONE** | 100% |
 | **Phase 4** | Seeding, Multi-Role RBAC, Pre-Paid Flow & E2E Verification | ✅ **DONE** | 100% |
 | **Phase 5** | Real-Time WebSockets, Redis Caching & Payment Gateway Engine | ✅ **DONE (5.1–5.3)** | 100% |
+| **Phase 6** | Cashier Shift, Payment Ledger, Attendance Review & Security Audit (FE audit handoff) | ✅ **DONE (6.1–6.6)** | 100% |
 
 ---
 
@@ -112,7 +113,7 @@
   - Public `POST /api/v1/public/orders` (Buat pesanan baru dengan snapshot harga & variasi dalam atomic transaction).
   - Public `GET /api/v1/public/orders/:orderNumber` (Status pesanan meja).
   - Staff `GET /api/v1/admin/orders` (Live Orders Monitor KDS Dapur/Kasir).
-  - Staff `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan: PENDING -> PAID -> PREPARING -> SERVED).
+  - Staff `PUT` / `PATCH /api/v1/admin/orders/:id/status` (Update status pesanan: PENDING -> PAID -> PREPARING -> SERVED). Sejak Phase 6, `PAID` & `CANCELLED` hanya `ADMIN` dan `CASHIER`.
 - [x] **3.7. Reports Module** (`src/modules/reports/`)
   - Admin `GET /api/v1/admin/reports/dashboard-overview` (Consolidated KPI, Recent Orders, Top Selling).
   - Admin `GET /api/v1/admin/reports/revenue` (Laporan Pendapatan, Total Order, Average Order Value).
@@ -154,3 +155,24 @@
   - Callback Webhook `POST /api/v1/public/payments/webhook` dengan validasi tanda tangan digital SHA-512 $\rightarrow$ otomatis mengubah status pesanan ke `PAID` dan memicu WebSocket alert ke dapur secara instan.
 - [ ] **5.4. Cloud Media Storage Upload (DEFERRED)**
   - S3 / Cloudinary / Supabase storage upload untuk gambar menu & banner promo (ditunda sesuai arahan).
+
+---
+
+## ✅ Phase 6: Cashier Shift, Payment Ledger, Attendance Review & Security Audit (COMPLETED 2026-11-21)
+
+Menindaklanjuti `docs/handoff/2026-11-20-fe-audit-handoff.md`. Branch `feat/cashier-shift-payment`.
+
+- [x] **6.1. Cashier Shift & Z-Report** (`src/modules/shifts/`)
+  - `GET /admin/shifts/current`, `POST /admin/shifts/open`, `POST /admin/shifts/:id/close`, `GET /admin/shifts` (`ADMIN`, `CASHIER`). Satu shift terbuka per cabang (unique `openLockKey`).
+- [x] **6.2. Konsolidasi Pembayaran & Ledger** (`src/modules/orders/order-payment*.ts`)
+  - Satu pintu pembayaran `OrderPaymentService.markPaid` untuk kasir & webhook: `paidAt` ditulis sekali, idempotent, tunai wajib shift terbuka (`409 SHIFT_NOT_OPEN`).
+  - Tabel `payments` (shift, metode, sumber, penerima, `providerRef` unik) ditulis dalam transaksi yang sama; total shift dihitung dari ledger dengan row lock terhadap tutup shift.
+  - Definisi "sudah dibayar" (`paidAt` terisi, bukan `CANCELLED`) dipakai dashboard, laporan, dan shift; batas hari WIB.
+- [x] **6.3. Verifikasi PIN Kiosk** — `POST /auth/verify-pin` dengan lockout 5x salah / 5 menit (`429`).
+- [x] **6.4. Presensi** — review lembur (`PATCH /admin/attendance/:id/overtime`), koreksi jam pulang (`/correction`), respons diselaraskan dengan schema FE, tanggal & batas terlambat WIB.
+- [x] **6.5. Audit Role & Keamanan**
+  - `RolesGuard` menolak route `admin/*` tanpa `@Roles`; `DELETE /admin/tables/:id` khusus `ADMIN`; `PAID`/`CANCELLED` khusus `ADMIN` & `CASHIER`.
+  - Lockout PIN dibagi antara verify-pin, clock-in, dan clock-out (`PinVerificationService`).
+  - Bypass signature webhook hanya di luar production; production menolak start dengan `PAYMENT_WEBHOOK_SECRET` default.
+  - `@ZodResponse` diterapkan sebelum enkripsi payload.
+- [x] **6.6. Sinkronisasi Dokumentasi** — integration guide, API contract, blueprint presensi, dan roadmap ini.
