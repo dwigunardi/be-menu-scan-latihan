@@ -6,7 +6,7 @@ export const PIN_MAX_ATTEMPTS = 5;
 export const PIN_LOCK_MINUTES = 5;
 
 /** Where the PIN was entered; only used for logs. */
-export type PinContext = 'KIOSK_EXIT' | 'CLOCK_IN' | 'CLOCK_OUT';
+export type PinContext = 'KIOSK_EXIT' | 'CLOCK_IN' | 'CLOCK_OUT' | 'HANDOVER';
 
 export interface PinHolder {
   id: string;

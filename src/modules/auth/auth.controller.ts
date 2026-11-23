@@ -17,6 +17,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { OnboardStaffDto } from './dto/onboard.dto';
 import { VerifyPinDto, VerifyPinResponseSchema } from './dto/verify-pin.dto';
+import { HandoverCandidatesResponseSchema, HandoverDto } from './dto/handover.dto';
 import { ZodResponse } from '../../common/decorators/zod-response.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipEncryption } from '../../common/decorators/skip-encryption.decorator';
@@ -82,6 +83,41 @@ export class AuthController {
     @Body() dto: OnboardStaffDto,
   ) {
     return this.authService.onboard(userId, dto);
+  }
+
+  @Get('handover/candidates')
+  @ZodResponse(HandoverCandidatesResponseSchema)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Staff who can take over this device in a shift handover',
+    description:
+      'Active, onboarded staff with a PIN, excluding ADMIN and the current user. Open to every logged-in staff role.',
+  })
+  @ApiResponse({ status: 200, description: '[{ id, employeeId, name, role, avatarUrl }]' })
+  async getHandoverCandidates(@CurrentUser('id') userId: string) {
+    return this.authService.getHandoverCandidates(userId);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post('handover')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Shift handover: verify the incoming staff PIN and switch the session to them',
+    description:
+      'Revokes the current session and returns a new session for the incoming staff (same shape as login). ' +
+      'The outgoing staff must close their cash drawer shift first.',
+  })
+  @ApiResponse({ status: 200, description: '{ accessToken, refreshToken, user } of the incoming staff' })
+  @ApiResponse({ status: 400, description: 'Wrong PIN, same staff, or incoming staff without PIN / onboarding' })
+  @ApiResponse({ status: 404, description: 'Incoming staff not found, inactive, or ADMIN' })
+  @ApiResponse({ status: 409, description: 'Outgoing staff still has an open cash drawer shift (code SHIFT_STILL_OPEN)' })
+  @ApiResponse({ status: 429, description: 'PIN locked (shared lockout) or rate limited' })
+  async handover(
+    @CurrentUser('id') userId: string,
+    @Body() dto: HandoverDto,
+  ) {
+    return this.authService.handover(userId, dto);
   }
 
   @Throttle({ default: { limit: 10, ttl: 60000 } })

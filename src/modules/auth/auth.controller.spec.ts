@@ -16,6 +16,8 @@ describe('AuthController', () => {
       logout: jest.fn(),
       getMe: jest.fn(),
       verifyPin: jest.fn(),
+      getHandoverCandidates: jest.fn(),
+      handover: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -169,6 +171,28 @@ describe('AuthController', () => {
       expect(authService.verifyPin).toHaveBeenCalledWith('u1', {
         pinCode: '2580',
       });
+    });
+  });
+
+  describe('handover', () => {
+    it('lists candidates for the current user', async () => {
+      authService.getHandoverCandidates.mockResolvedValue([]);
+
+      await controller.getHandoverCandidates('u1');
+
+      expect(authService.getHandoverCandidates).toHaveBeenCalledWith('u1');
+    });
+
+    it('hands over from the current user to the incoming staff', async () => {
+      const dto = {
+        incomingStaffId: '22222222-2222-4222-8222-222222222222',
+        pinCode: '2580',
+      };
+      authService.handover.mockResolvedValue({} as any);
+
+      await controller.handover('u1', dto);
+
+      expect(authService.handover).toHaveBeenCalledWith('u1', dto);
     });
   });
 });
