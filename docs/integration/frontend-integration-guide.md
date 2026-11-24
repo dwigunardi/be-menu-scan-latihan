@@ -700,9 +700,21 @@ Format error (selalu plain JSON):
 }
 ```
 
-- `code` hanya ada pada error yang punya kode mesin. Saat ini: `SHIFT_NOT_OPEN` (bayar tunai tanpa shift kasir terbuka) dan `SHIFT_STILL_OPEN` (serah terima saat staf yang keluar masih punya shift laci terbuka). Cek `code`, jangan teks `message`.
+- `code` hanya ada pada error yang punya kode mesin. Cek `code`, jangan teks `message`:
+
+| `code` | Status | Arti & tindakan FE |
+| :--- | :---: | :--- |
+| `TOKEN_EXPIRED` | `401` | Access token kedaluwarsa. Refresh (cookie) lalu ulangi request **sekali**. |
+| `TOKEN_MISSING` | `401` | Request ke endpoint terproteksi tanpa Bearer token. Login. |
+| `TOKEN_INVALID` | `401` | Access token rusak atau tanda tangan salah. Login ulang, jangan refresh. |
+| `ACCOUNT_DISABLED` | `401` | Akun nonaktif atau dihapus (berlaku seketika, juga untuk access token yang masih berlaku). Login ulang tidak akan berhasil. |
+| `INVALID_CREDENTIALS` | `401` | Login: email atau password salah. Tampilkan pesan, **jangan** refresh atau retry. |
+| `INVALID_TEMP_PASSWORD` | `401` | Onboarding: password sementara salah. Tampilkan pesan, **jangan** refresh atau retry. |
+| `SHIFT_NOT_OPEN` | `409` | Bayar tunai tanpa shift kasir terbuka. Arahkan ke buka shift. |
+| `SHIFT_STILL_OPEN` | `409` | Serah terima saat staf yang keluar masih punya shift laci terbuka. Arahkan ke tutup shift. |
+
 - `details` hanya ada pada error validasi (`400`), berisi daftar `{ "field", "message" }` per field yang gagal.
-- `401` berarti sesi/token tidak valid (memicu refresh token). PIN salah **tidak pernah** dibalas `401`.
+- `401` hanya memicu refresh token jika `code` = `TOKEN_EXPIRED`. Refresh yang gagal (`POST /auth/refresh` `401`) berarti login ulang. PIN salah **tidak pernah** dibalas `401`.
 - `429` berarti rate limit per IP (pesan "Terlalu banyak permintaan. Coba lagi dalam X detik." plus header `Retry-After` dalam detik), atau PIN staf sedang terkunci (pesan menyebut sisa menit). Tampilkan `message` dari backend apa adanya.
 
 ---

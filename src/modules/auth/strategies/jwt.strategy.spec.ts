@@ -35,7 +35,7 @@ describe('JwtStrategy', () => {
       role: UserRole.ADMIN,
     };
 
-    const mockUser = {
+    const principal = {
       id: 'user-uuid-1',
       email: 'admin@menuscan.com',
       name: 'Admin User',
@@ -44,10 +44,15 @@ describe('JwtStrategy', () => {
       createdAt: new Date(),
     };
 
-    (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+    (prismaService.user.findUnique as jest.Mock).mockResolvedValue({
+      ...principal,
+      isActive: true,
+      deletedAt: null,
+    });
 
     const result = await strategy.validate(payload);
-    expect(result).toEqual(mockUser);
+    // The account status fields are checked, not exposed on request.user
+    expect(result).toEqual(principal);
     expect(prismaService.user.findUnique).toHaveBeenCalledWith({
       where: { id: 'user-uuid-1' },
       select: {
@@ -57,8 +62,32 @@ describe('JwtStrategy', () => {
         role: true,
         needsOnboarding: true,
         createdAt: true,
+        isActive: true,
+        deletedAt: true,
       },
     });
+  });
+
+  it.each([
+    ['deactivated', { isActive: false, deletedAt: null }],
+    ['deleted', { isActive: true, deletedAt: new Date() }],
+  ])('rejects a %s account immediately with code ACCOUNT_DISABLED', async (_label, status) => {
+    (prismaService.user.findUnique as jest.Mock).mockResolvedValue({
+      id: 'user-uuid-1',
+      email: 'admin@menuscan.com',
+      name: 'Admin User',
+      role: UserRole.ADMIN,
+      needsOnboarding: false,
+      createdAt: new Date(),
+      ...status,
+    });
+
+    const error = await strategy
+      .validate({ sub: 'user-uuid-1', email: 'a', name: 'b', role: UserRole.ADMIN })
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(UnauthorizedException);
+    expect(error.getResponse()).toMatchObject({ code: 'ACCOUNT_DISABLED' });
   });
 
   it('should throw UnauthorizedException if user does not exist in database', async () => {

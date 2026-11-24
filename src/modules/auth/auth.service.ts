@@ -14,6 +14,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EcdhService } from '../../common/crypto/ecdh.service';
 import { PinVerificationService } from '../../common/security/pin-verification.service';
+import { AuthErrorCode, authError } from '../../common/constants/auth-error-codes';
 import { hashRefreshToken, refreshTokenMatches } from './refresh-token-hash';
 import { SessionSupersededException } from './session-superseded.exception';
 import { HandshakeDto } from './dto/handshake.dto';
@@ -78,16 +79,25 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw authError(
+        AuthErrorCode.INVALID_CREDENTIALS,
+        'Invalid email or password',
+      );
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('Akun Anda telah dinonaktifkan. Hubungi admin.');
+      throw authError(
+        AuthErrorCode.ACCOUNT_DISABLED,
+        'Akun Anda telah dinonaktifkan. Hubungi admin.',
+      );
     }
 
     const isPasswordValid = await bcrypt.compare(dto.password, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw authError(
+        AuthErrorCode.INVALID_CREDENTIALS,
+        'Invalid email or password',
+      );
     }
 
     const tokens = await this.generateTokens(
@@ -142,7 +152,10 @@ export class AuthService {
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('Akun Anda telah dinonaktifkan. Hubungi admin.');
+      throw authError(
+        AuthErrorCode.ACCOUNT_DISABLED,
+        'Akun Anda telah dinonaktifkan. Hubungi admin.',
+      );
     }
 
     if (!user.needsOnboarding) {
@@ -151,7 +164,10 @@ export class AuthService {
 
     const isPasswordValid = await bcrypt.compare(dto.currentPassword, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Password sementara saat ini tidak sesuai.');
+      throw authError(
+        AuthErrorCode.INVALID_TEMP_PASSWORD,
+        'Password sementara saat ini tidak sesuai.',
+      );
     }
 
     const hashedNewPassword = await bcrypt.hash(dto.newPassword, 10);
