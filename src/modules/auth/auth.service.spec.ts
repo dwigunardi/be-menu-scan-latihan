@@ -701,4 +701,72 @@ describe('AuthService', () => {
       );
     });
   });
+
+  describe('machine-readable 401 codes', () => {
+    const responseOf = async (promise: Promise<unknown>) =>
+      promise.then(
+        () => null,
+        (e: any) => ({ status: e.getStatus(), ...e.getResponse() }),
+      );
+
+    it('login: unknown email -> INVALID_CREDENTIALS', async () => {
+      prismaService.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        responseOf(service.login({ email: 'nobody@x.com', password: 'whatever1' })),
+      ).resolves.toMatchObject({ status: 401, code: 'INVALID_CREDENTIALS' });
+    });
+
+    it('login: wrong password -> INVALID_CREDENTIALS', async () => {
+      prismaService.user.findUnique.mockResolvedValue({ ...mockUser, isActive: true });
+
+      await expect(
+        responseOf(service.login({ email: mockUser.email, password: 'wrong-password' })),
+      ).resolves.toMatchObject({ status: 401, code: 'INVALID_CREDENTIALS' });
+    });
+
+    it('login: deactivated account -> ACCOUNT_DISABLED', async () => {
+      prismaService.user.findUnique.mockResolvedValue({ ...mockUser, isActive: false });
+
+      await expect(
+        responseOf(service.login({ email: mockUser.email, password: 'password123' })),
+      ).resolves.toMatchObject({ status: 401, code: 'ACCOUNT_DISABLED' });
+    });
+
+    it('onboard: wrong temporary password -> INVALID_TEMP_PASSWORD (not a token problem)', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        isActive: true,
+        needsOnboarding: true,
+      });
+
+      await expect(
+        responseOf(
+          service.onboard('user-123', {
+            currentPassword: 'not-the-temp-password',
+            newPassword: 'NewPassw0rd99',
+            pinCode: '3691',
+          }),
+        ),
+      ).resolves.toMatchObject({ status: 401, code: 'INVALID_TEMP_PASSWORD' });
+    });
+
+    it('onboard: deactivated account -> ACCOUNT_DISABLED', async () => {
+      prismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        isActive: false,
+        needsOnboarding: true,
+      });
+
+      await expect(
+        responseOf(
+          service.onboard('user-123', {
+            currentPassword: 'password123',
+            newPassword: 'NewPassw0rd99',
+            pinCode: '3691',
+          }),
+        ),
+      ).resolves.toMatchObject({ status: 401, code: 'ACCOUNT_DISABLED' });
+    });
+  });
 });

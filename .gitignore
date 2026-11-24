@@ -65,9 +65,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .opencode/*
 skills-lock.json
 
-# env
+# env (the example file with placeholders is tracked)
 .env*
 .env
+!.env.example
 
 # Uploads
 /uploads

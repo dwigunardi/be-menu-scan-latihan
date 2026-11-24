@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { AuthErrorCode, authError } from '../../../common/constants/auth-error-codes';
 
 export interface JwtPayload {
   sub: string;
@@ -41,13 +42,23 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
         role: true,
         needsOnboarding: true,
         createdAt: true,
+        isActive: true,
+        deletedAt: true,
       },
     });
 
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
     }
+    // A deactivated or deleted account stops working immediately, not when its access token expires
+    if (!user.isActive || user.deletedAt) {
+      throw authError(
+        AuthErrorCode.ACCOUNT_DISABLED,
+        'Akun Anda telah dinonaktifkan. Hubungi admin.',
+      );
+    }
 
-    return user;
+    const { isActive: _isActive, deletedAt: _deletedAt, ...principal } = user;
+    return principal;
   }
 }
